@@ -47,10 +47,6 @@ Each service owns its own Postgres database (`payflow`, `orchestrator`,
 convenience — mirrors "database per service" without needing a separate
 Postgres instance per service.
 
-A full HLD/LLD writeup (requirements, capacity estimate, state machine,
-schema, design patterns, failure scenarios) lives here:
-https://claude.ai/code/artifact/e22d9806-ee1c-4083-ad9f-abd5b7b47502
-
 ## Status
 
 **Built:** `payment-api`, `saga-orchestrator`, `fraud-service` — a payment
@@ -60,10 +56,6 @@ verified end-to-end against real Kafka and Postgres, not just compiled.
 **Not built yet:** `funds-auth-service`, `ledger-service`,
 `settlement-service`, `notification-service`, compensation/rollback wiring
 for mid-saga failures, and a React + AG Grid dashboard.
-
-Live build-status dashboard (tracks what's built vs. planned, verified
-checks, and a running build log):
-https://claude.ai/code/artifact/cb63f96e-20b9-42de-abdb-62fff9ae07da
 
 ## Running it locally
 
