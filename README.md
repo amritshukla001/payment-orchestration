@@ -17,11 +17,11 @@ instead of leaving the system in a half-done state.
 Client → Payment API (+ outbox) → Kafka: payment.events
                                           │
                                    Saga Orchestrator ⇄ Kafka: payment.commands
-                                          │                    │           │
-                          ┌───────────────┼────────────┬───────┘           │
-                          ▼               ▼             ▼                 ▼
-                    Fraud Service   Funds Auth    Ledger Service   (Settlement, planned)
-                                                    (planned)
+                                          │                    │            │            │
+                          ┌───────────────┼────────────┬───────┴────┬───────┘            │
+                          ▼               ▼             ▼            ▼                   ▼
+                    Fraud Service   Funds Auth    Ledger Service  (Settlement,      (Notification,
+                                                                    planned)          planned)
 ```
 
 - **payment-api** — REST intake. Validates a request, persists it, and
@@ -32,12 +32,19 @@ Client → Payment API (+ outbox) → Kafka: payment.events
   events on `payment.events`, decides the next step, and issues commands on
   `payment.commands`. Keeps the whole lifecycle in one place instead of
   scattering it across every service's event handlers.
-- **fraud-service** — consumes `CHECK_FRAUD` commands, evaluates a threshold
-  rule, publishes the verdict back onto `payment.events`.
+- **fraud-service** — consumes `CHECK_FRAUD` commands, evaluates independent
+  rule strategies (`FraudRule` implementations, Strategy pattern), publishes
+  the verdict back onto `payment.events`.
 - **funds-auth-service** — a mock bank. Lazily provisions accounts on first
   sight, reserves/releases funds with optimistic locking, and already
   implements the `RELEASE_FUNDS` handler ahead of the compensation logic
   that will call it.
+- **ledger-service** — append-only double-entry ledger. Posts the HOLD leg
+  (debit payer, credit a fixed suspense account) when funds are authorized;
+  settlement-service (a later phase) will post the matching FINAL leg
+  (debit suspense, credit payee) to complete the capture. Nothing here is
+  ever updated — a correction would be a new offsetting entry, never a
+  mutation of history.
 - **common** — shared event/command contracts (`EventEnvelope`, `PaymentState`,
   event and command records) used by every service.
 
@@ -47,22 +54,23 @@ at-least-once delivery, so idempotent processing is what makes redelivery
 safe rather than a source of duplicate work.
 
 Each service owns its own Postgres database (`payflow`, `orchestrator`,
-`fraud`, `fundsauth`), even though they currently share one container for
-local-dev convenience — mirrors "database per service" without needing a
-separate Postgres instance per service.
+`fraud`, `fundsauth`, `ledger`), even though they currently share one
+container for local-dev convenience — mirrors "database per service"
+without needing a separate Postgres instance per service.
 
 ## Status
 
 **Built:** `payment-api`, `saga-orchestrator`, `fraud-service`,
-`funds-auth-service` — a payment can flow from intake through fraud approval
-and funds authorization to `AUTHORIZED`, verified end-to-end against real
-Kafka and Postgres, not just compiled. Both rejection branches (fraud
-threshold, insufficient funds) verified too.
+`funds-auth-service`, `ledger-service` — a payment can flow from intake
+through fraud approval, funds authorization, and a real double-entry ledger
+posting to `LEDGER_POSTED`, verified end-to-end against real Kafka and
+Postgres, not just compiled. All rejection branches (fraud threshold,
+insufficient funds) verified too.
 
-**Not built yet:** `ledger-service`, `settlement-service`,
-`notification-service`, compensation/rollback wiring for mid-saga failures
-(funds-auth-service already implements the `RELEASE_FUNDS` handler ahead of
-this), and a React + AG Grid dashboard.
+**Not built yet:** `settlement-service`, `notification-service`,
+compensation/rollback wiring for mid-saga failures (funds-auth-service
+already implements the `RELEASE_FUNDS` handler ahead of this), and a
+React + AG Grid dashboard.
 
 **Also on the roadmap** — the difference between a demo and something that
 reads as production-grade:
@@ -93,6 +101,7 @@ cd payment-api && mvn spring-boot:run          # :8080
 cd saga-orchestrator && mvn spring-boot:run    # :8082
 cd fraud-service && mvn spring-boot:run        # :8083
 cd funds-auth-service && mvn spring-boot:run   # :8084
+cd ledger-service && mvn spring-boot:run       # :8085
 ```
 
 Kafka UI is at http://localhost:8081 for browsing topics/messages directly.
@@ -119,6 +128,13 @@ Check saga progress directly:
 ```bash
 docker exec payflow-postgres psql -U payflow -d orchestrator \
   -c "SELECT payment_id, state FROM payment_saga_state;"
+```
+
+Check the actual ledger posting:
+
+```bash
+docker exec payflow-postgres psql -U payflow -d ledger \
+  -c "SELECT payment_id, debit_account, credit_account, amount_cents, posting_type FROM ledger_entries;"
 ```
 
 ## Tech stack
