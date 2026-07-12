@@ -1,10 +1,12 @@
 package com.payflow.orchestrator.consumer;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.payflow.common.commands.AuthorizeFundsCommand;
 import com.payflow.common.commands.CheckFraudCommand;
 import com.payflow.common.enums.PaymentState;
 import com.payflow.common.events.EventEnvelope;
 import com.payflow.common.events.FraudRejectedEvent;
+import com.payflow.common.events.FundsAuthorizationFailedEvent;
 import com.payflow.common.events.PaymentEventType;
 import com.payflow.common.events.PaymentInitiatedEvent;
 import com.payflow.orchestrator.domain.PaymentSagaState;
@@ -78,6 +80,8 @@ public class PaymentEventListener {
             case PAYMENT_INITIATED -> onPaymentInitiated(envelope);
             case FRAUD_APPROVED -> onFraudApproved(envelope);
             case FRAUD_REJECTED -> onFraudRejected(envelope);
+            case FUNDS_AUTHORIZED -> onFundsAuthorized(envelope);
+            case FUNDS_AUTHORIZATION_FAILED -> onFundsAuthorizationFailed(envelope);
             default -> log.info("No saga handling wired up yet for {}", type);
         }
     }
@@ -97,16 +101,21 @@ public class PaymentEventListener {
         log.info("Payment {} INITIATED -> issued CHECK_FRAUD", event.paymentId());
     }
 
-    private void onFraudApproved(EventEnvelope envelope) {
-        sagaStateRepository.findById(envelope.aggregateId()).ifPresentOrElse(
-                state -> {
-                    state.advanceTo(PaymentState.FRAUD_CHECKED, Instant.now());
-                    sagaStateRepository.save(state);
-                    log.info("Payment {} advanced to FRAUD_CHECKED (funds-auth not built yet — saga pauses here)",
-                            envelope.aggregateId());
-                },
-                () -> log.warn("Received FRAUD_APPROVED for unknown payment {}", envelope.aggregateId())
-        );
+    private void onFraudApproved(EventEnvelope envelope) throws Exception {
+        UUID paymentId = envelope.aggregateId();
+        PaymentSagaState state = sagaStateRepository.findById(paymentId).orElse(null);
+        if (state == null) {
+            log.warn("Received FRAUD_APPROVED for unknown payment {}", paymentId);
+            return;
+        }
+
+        state.advanceTo(PaymentState.FRAUD_CHECKED, Instant.now());
+        sagaStateRepository.save(state);
+
+        AuthorizeFundsCommand command = new AuthorizeFundsCommand(
+                paymentId, state.getPayerAccount(), state.getAmountCents(), state.getCurrency(), Instant.now());
+        publishCommand(paymentId, "AUTHORIZE_FUNDS", command);
+        log.info("Payment {} FRAUD_CHECKED -> issued AUTHORIZE_FUNDS", paymentId);
     }
 
     private void onFraudRejected(EventEnvelope envelope) throws Exception {
@@ -118,6 +127,33 @@ public class PaymentEventListener {
                     log.info("Payment {} FAILED — fraud rejected: {}", event.paymentId(), event.reason());
                 },
                 () -> log.warn("Received FRAUD_REJECTED for unknown payment {}", event.paymentId())
+        );
+    }
+
+    private void onFundsAuthorized(EventEnvelope envelope) {
+        UUID paymentId = envelope.aggregateId();
+        sagaStateRepository.findById(paymentId).ifPresentOrElse(
+                state -> {
+                    state.advanceTo(PaymentState.AUTHORIZED, Instant.now());
+                    sagaStateRepository.save(state);
+                    log.info("Payment {} advanced to AUTHORIZED (ledger-service not built yet — saga pauses here)",
+                            paymentId);
+                },
+                () -> log.warn("Received FUNDS_AUTHORIZED for unknown payment {}", paymentId)
+        );
+    }
+
+    private void onFundsAuthorizationFailed(EventEnvelope envelope) throws Exception {
+        FundsAuthorizationFailedEvent event =
+                objectMapper.treeToValue(envelope.payload(), FundsAuthorizationFailedEvent.class);
+        sagaStateRepository.findById(event.paymentId()).ifPresentOrElse(
+                state -> {
+                    state.advanceTo(PaymentState.FAILED, Instant.now());
+                    sagaStateRepository.save(state);
+                    log.info("Payment {} FAILED — funds authorization rejected: {}",
+                            event.paymentId(), event.reason());
+                },
+                () -> log.warn("Received FUNDS_AUTHORIZATION_FAILED for unknown payment {}", event.paymentId())
         );
     }
 

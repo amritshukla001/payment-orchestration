@@ -3,3 +3,4 @@
 -- without needing a separate Postgres instance per service.
 CREATE DATABASE orchestrator;
 CREATE DATABASE fraud;
+CREATE DATABASE fundsauth;
