@@ -17,11 +17,11 @@ instead of leaving the system in a half-done state.
 Client → Payment API (+ outbox) → Kafka: payment.events
                                           │
                                    Saga Orchestrator ⇄ Kafka: payment.commands
-                                          │                         │
-                          ┌───────────────┼─────────────┬──────────┘
-                          ▼               ▼              ▼
-                    Fraud Service   Funds Auth      Ledger Service
-                                    (planned)         (planned)
+                                          │                    │           │
+                          ┌───────────────┼────────────┬───────┘           │
+                          ▼               ▼             ▼                 ▼
+                    Fraud Service   Funds Auth    Ledger Service   (Settlement, planned)
+                                                    (planned)
 ```
 
 - **payment-api** — REST intake. Validates a request, persists it, and
@@ -34,6 +34,10 @@ Client → Payment API (+ outbox) → Kafka: payment.events
   scattering it across every service's event handlers.
 - **fraud-service** — consumes `CHECK_FRAUD` commands, evaluates a threshold
   rule, publishes the verdict back onto `payment.events`.
+- **funds-auth-service** — a mock bank. Lazily provisions accounts on first
+  sight, reserves/releases funds with optimistic locking, and already
+  implements the `RELEASE_FUNDS` handler ahead of the compensation logic
+  that will call it.
 - **common** — shared event/command contracts (`EventEnvelope`, `PaymentState`,
   event and command records) used by every service.
 
@@ -43,19 +47,22 @@ at-least-once delivery, so idempotent processing is what makes redelivery
 safe rather than a source of duplicate work.
 
 Each service owns its own Postgres database (`payflow`, `orchestrator`,
-`fraud`), even though they currently share one container for local-dev
-convenience — mirrors "database per service" without needing a separate
-Postgres instance per service.
+`fraud`, `fundsauth`), even though they currently share one container for
+local-dev convenience — mirrors "database per service" without needing a
+separate Postgres instance per service.
 
 ## Status
 
-**Built:** `payment-api`, `saga-orchestrator`, `fraud-service` — a payment
-can flow from intake through a fraud-approved or fraud-rejected verdict,
-verified end-to-end against real Kafka and Postgres, not just compiled.
+**Built:** `payment-api`, `saga-orchestrator`, `fraud-service`,
+`funds-auth-service` — a payment can flow from intake through fraud approval
+and funds authorization to `AUTHORIZED`, verified end-to-end against real
+Kafka and Postgres, not just compiled. Both rejection branches (fraud
+threshold, insufficient funds) verified too.
 
-**Not built yet:** `funds-auth-service`, `ledger-service`,
-`settlement-service`, `notification-service`, compensation/rollback wiring
-for mid-saga failures, and a React + AG Grid dashboard.
+**Not built yet:** `ledger-service`, `settlement-service`,
+`notification-service`, compensation/rollback wiring for mid-saga failures
+(funds-auth-service already implements the `RELEASE_FUNDS` handler ahead of
+this), and a React + AG Grid dashboard.
 
 ## Running it locally
 
@@ -72,6 +79,7 @@ mvn -DskipTests install
 cd payment-api && mvn spring-boot:run          # :8080
 cd saga-orchestrator && mvn spring-boot:run    # :8082
 cd fraud-service && mvn spring-boot:run        # :8083
+cd funds-auth-service && mvn spring-boot:run   # :8084
 ```
 
 Kafka UI is at http://localhost:8081 for browsing topics/messages directly.
