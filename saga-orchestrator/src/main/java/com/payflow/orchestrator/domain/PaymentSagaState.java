@@ -20,6 +20,9 @@ public class PaymentSagaState {
     @Column(name = "payer_account", nullable = false)
     private UUID payerAccount;
 
+    @Column(name = "payee_account", nullable = false)
+    private UUID payeeAccount;
+
     @Column(name = "amount_cents", nullable = false)
     private long amountCents;
 
@@ -41,10 +44,11 @@ public class PaymentSagaState {
         // JPA
     }
 
-    public PaymentSagaState(UUID paymentId, UUID payerAccount, long amountCents, String currency,
+    public PaymentSagaState(UUID paymentId, UUID payerAccount, UUID payeeAccount, long amountCents, String currency,
                              PaymentState state, Instant now) {
         this.paymentId = paymentId;
         this.payerAccount = payerAccount;
+        this.payeeAccount = payeeAccount;
         this.amountCents = amountCents;
         this.currency = currency;
         this.state = state;
@@ -57,6 +61,10 @@ public class PaymentSagaState {
 
     public UUID getPayerAccount() {
         return payerAccount;
+    }
+
+    public UUID getPayeeAccount() {
+        return payeeAccount;
     }
 
     public long getAmountCents() {

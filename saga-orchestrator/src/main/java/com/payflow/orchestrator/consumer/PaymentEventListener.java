@@ -3,6 +3,7 @@ package com.payflow.orchestrator.consumer;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.payflow.common.commands.AuthorizeFundsCommand;
 import com.payflow.common.commands.CheckFraudCommand;
+import com.payflow.common.commands.PostLedgerCommand;
 import com.payflow.common.enums.PaymentState;
 import com.payflow.common.events.EventEnvelope;
 import com.payflow.common.events.FraudRejectedEvent;
@@ -82,6 +83,7 @@ public class PaymentEventListener {
             case FRAUD_REJECTED -> onFraudRejected(envelope);
             case FUNDS_AUTHORIZED -> onFundsAuthorized(envelope);
             case FUNDS_AUTHORIZATION_FAILED -> onFundsAuthorizationFailed(envelope);
+            case LEDGER_POSTED -> onLedgerPosted(envelope);
             default -> log.info("No saga handling wired up yet for {}", type);
         }
     }
@@ -90,7 +92,7 @@ public class PaymentEventListener {
         PaymentInitiatedEvent event = objectMapper.treeToValue(envelope.payload(), PaymentInitiatedEvent.class);
 
         PaymentSagaState state = new PaymentSagaState(
-                event.paymentId(), event.payerAccount(), event.amountCents(), event.currency(),
+                event.paymentId(), event.payerAccount(), event.payeeAccount(), event.amountCents(), event.currency(),
                 PaymentState.INITIATED, Instant.now());
         sagaStateRepository.save(state);
 
@@ -130,16 +132,34 @@ public class PaymentEventListener {
         );
     }
 
-    private void onFundsAuthorized(EventEnvelope envelope) {
+    private void onFundsAuthorized(EventEnvelope envelope) throws Exception {
+        UUID paymentId = envelope.aggregateId();
+        PaymentSagaState state = sagaStateRepository.findById(paymentId).orElse(null);
+        if (state == null) {
+            log.warn("Received FUNDS_AUTHORIZED for unknown payment {}", paymentId);
+            return;
+        }
+
+        state.advanceTo(PaymentState.AUTHORIZED, Instant.now());
+        sagaStateRepository.save(state);
+
+        PostLedgerCommand command = new PostLedgerCommand(
+                paymentId, state.getPayerAccount(), state.getPayeeAccount(),
+                state.getAmountCents(), state.getCurrency(), Instant.now());
+        publishCommand(paymentId, "POST_LEDGER", command);
+        log.info("Payment {} AUTHORIZED -> issued POST_LEDGER", paymentId);
+    }
+
+    private void onLedgerPosted(EventEnvelope envelope) {
         UUID paymentId = envelope.aggregateId();
         sagaStateRepository.findById(paymentId).ifPresentOrElse(
                 state -> {
-                    state.advanceTo(PaymentState.AUTHORIZED, Instant.now());
+                    state.advanceTo(PaymentState.LEDGER_POSTED, Instant.now());
                     sagaStateRepository.save(state);
-                    log.info("Payment {} advanced to AUTHORIZED (ledger-service not built yet — saga pauses here)",
+                    log.info("Payment {} advanced to LEDGER_POSTED (settlement-service not built yet — saga pauses here)",
                             paymentId);
                 },
-                () -> log.warn("Received FUNDS_AUTHORIZED for unknown payment {}", paymentId)
+                () -> log.warn("Received LEDGER_POSTED for unknown payment {}", paymentId)
         );
     }
 

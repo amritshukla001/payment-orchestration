@@ -4,3 +4,4 @@
 CREATE DATABASE orchestrator;
 CREATE DATABASE fraud;
 CREATE DATABASE fundsauth;
+CREATE DATABASE ledger;

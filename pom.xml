@@ -32,6 +32,7 @@
     <module>saga-orchestrator</module>
     <module>fraud-service</module>
     <module>funds-auth-service</module>
+    <module>ledger-service</module>
   </modules>
 
   <dependencyManagement>
