@@ -62,7 +62,11 @@ threshold, insufficient funds) verified too.
 **Not built yet:** `ledger-service`, `settlement-service`,
 `notification-service`, compensation/rollback wiring for mid-saga failures
 (funds-auth-service already implements the `RELEASE_FUNDS` handler ahead of
-this), and a React + AG Grid dashboard.
+this), a React + AG Grid dashboard, and two cross-cutting concerns that are
+currently the most conspicuous gaps in the project — **API-key auth**
+(every endpoint is wide open right now) and **observability** (metrics +
+distributed tracing across the 4-service saga; Actuator already exposes
+the hooks, nothing's wired to them yet).
 
 ## Running it locally
 
