@@ -9,6 +9,7 @@ import com.payflow.common.events.PaymentEventType;
 import com.payflow.fraudservice.domain.ProcessedEvent;
 import com.payflow.fraudservice.repository.ProcessedEventRepository;
 import com.payflow.fraudservice.rules.FraudRuleEngine;
+import com.payflow.fraudservice.rules.Verdict;
 import org.apache.kafka.clients.consumer.ConsumerRecord;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -59,7 +60,7 @@ public class FraudCommandListener {
             }
 
             CheckFraudCommand command = objectMapper.treeToValue(envelope.payload(), CheckFraudCommand.class);
-            FraudRuleEngine.Verdict verdict = ruleEngine.evaluate(command);
+            Verdict verdict = ruleEngine.evaluate(command);
 
             if (verdict.approved()) {
                 publish(command.paymentId(), PaymentEventType.FRAUD_APPROVED,

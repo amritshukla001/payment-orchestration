@@ -3,32 +3,31 @@ package com.payflow.fraudservice.rules;
 import com.payflow.common.commands.CheckFraudCommand;
 import org.springframework.stereotype.Component;
 
+import java.util.List;
+import java.util.Optional;
+
 /**
- * Deliberately simple rule set — a real fraud engine would score velocity,
- * device fingerprint, and blocklists. The point here is the pipeline
- * (command in, verdict out), not sophisticated fraud modeling.
+ * Consults each registered FraudRule in turn and rejects on the first
+ * objection. Spring autowires every FraudRule bean into the list below —
+ * adding a rule to the strategy set means writing a new @Component, not
+ * editing this class.
  */
 @Component
 public class FraudRuleEngine {
 
-    private static final long HIGH_VALUE_THRESHOLD_CENTS = 1_000_000L; // $10,000
+    private final List<FraudRule> rules;
 
-    public Verdict evaluate(CheckFraudCommand command) {
-        if (command.amountCents() > HIGH_VALUE_THRESHOLD_CENTS) {
-            return Verdict.reject("Amount exceeds high-value threshold ($10,000)");
-        }
-        if (command.amountCents() <= 0) {
-            return Verdict.reject("Non-positive amount");
-        }
-        return Verdict.approve();
+    public FraudRuleEngine(List<FraudRule> rules) {
+        this.rules = rules;
     }
 
-    public record Verdict(boolean approved, String reason) {
-        public static Verdict approve() {
-            return new Verdict(true, null);
+    public Verdict evaluate(CheckFraudCommand command) {
+        for (FraudRule rule : rules) {
+            Optional<String> rejection = rule.checkForRejection(command);
+            if (rejection.isPresent()) {
+                return Verdict.reject(rejection.get());
+            }
         }
-        public static Verdict reject(String reason) {
-            return new Verdict(false, reason);
-        }
+        return Verdict.approve();
     }
 }
