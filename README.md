@@ -62,11 +62,20 @@ threshold, insufficient funds) verified too.
 **Not built yet:** `ledger-service`, `settlement-service`,
 `notification-service`, compensation/rollback wiring for mid-saga failures
 (funds-auth-service already implements the `RELEASE_FUNDS` handler ahead of
-this), a React + AG Grid dashboard, and two cross-cutting concerns that are
-currently the most conspicuous gaps in the project — **API-key auth**
-(every endpoint is wide open right now) and **observability** (metrics +
-distributed tracing across the 4-service saga; Actuator already exposes
-the hooks, nothing's wired to them yet).
+this), and a React + AG Grid dashboard.
+
+**Also on the roadmap** — the difference between a demo and something that
+reads as production-grade:
+- **Security** — API-key auth (every endpoint is wide open right now)
+- **Observability** — metrics (Micrometer/Prometheus) + distributed tracing across the 4-service saga
+- **Resilience** — circuit breaker + retry policy (Resilience4j); Kafka redelivery gives retries "for free" today but there's no deliberate backoff policy
+- **Tests** — currently zero. JUnit/Mockito for pure logic, Testcontainers for real Postgres/Kafka integration tests
+- **CI** — GitHub Actions running build + tests on every push
+- **API documentation** — OpenAPI/Swagger on payment-api
+- **Containerization** — a Dockerfile per service + a compose file that builds from source, so running this doesn't require a local Java/Maven install
+- **Architecture Decision Records** — short docs on why Kafka over Pulsar, why orchestration over choreography
+- **Schema evolution discipline** — every future schema change ships as a new Flyway migration, never editing one already applied
+- **Load testing** — k6/Gatling against payment-api, to turn the design doc's capacity estimate into a measured number
 
 ## Running it locally
 
