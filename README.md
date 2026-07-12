@@ -1,5 +1,7 @@
 # payment-orchestration
 
+[![CI](https://github.com/amritshukla001/payment-orchestration/actions/workflows/ci.yml/badge.svg)](https://github.com/amritshukla001/payment-orchestration/actions/workflows/ci.yml)
+
 A saga-based, event-driven payment orchestration system — a portfolio project
 demonstrating the same architecture patterns used in production banking
 systems (event-driven microservices, workflow orchestration, idempotent
@@ -77,13 +79,40 @@ reads as production-grade:
 - **Security** — API-key auth (every endpoint is wide open right now)
 - **Observability** — metrics (Micrometer/Prometheus) + distributed tracing across the 4-service saga
 - **Resilience** — circuit breaker + retry policy (Resilience4j); Kafka redelivery gives retries "for free" today but there's no deliberate backoff policy
-- **Tests** — currently zero. JUnit/Mockito for pure logic, Testcontainers for real Postgres/Kafka integration tests
-- **CI** — GitHub Actions running build + tests on every push
 - **API documentation** — OpenAPI/Swagger on payment-api
 - **Containerization** — a Dockerfile per service + a compose file that builds from source, so running this doesn't require a local Java/Maven install
 - **Architecture Decision Records** — short docs on why Kafka over Pulsar, why orchestration over choreography
 - **Schema evolution discipline** — every future schema change ships as a new Flyway migration, never editing one already applied
 - **Load testing** — k6/Gatling against payment-api, to turn the design doc's capacity estimate into a measured number
+
+## Testing
+
+Tests are written alongside each service as it's built, not deferred to the
+end — every phase since `fraud-service` has shipped with its own tests.
+
+- **Unit tests** (JUnit 5 + Mockito) for pure logic and mockable
+  collaborators: fraud-service's `FraudRule` strategies and rule engine,
+  funds-auth-service's `MockBankLedger` (reserve/release/insufficient-funds),
+  ledger-service's `DoubleEntryLedger`, and — the most important one —
+  saga-orchestrator's `PaymentEventListener`, covering every state
+  transition (`INITIATED → FRAUD_CHECKED → AUTHORIZED → LEDGER_POSTED`,
+  both `FAILED` branches, idempotent redelivery, and unknown-payment
+  handling). That last suite is the **regression pack** for the saga: every
+  scenario in it mirrors something that was previously verified by hand
+  with curl + psql, now automated so a future change can't silently break
+  it without CI catching it.
+- **Integration test** (Testcontainers — real Postgres + real Kafka, not
+  mocks) for payment-api: posts a real payment over HTTP, confirms it's
+  persisted, confirms the outbox actually published to a live Kafka topic,
+  and confirms the `Idempotency-Key` retry path returns the same payment
+  instead of creating a duplicate.
+
+Run everything: `mvn test` from the repo root (requires Docker for the
+Testcontainers-based payment-api test — this needs a Docker Engine version
+Testcontainers is tested against; a very new Docker Desktop can trip a
+known compatibility issue between Testcontainers and its bundled
+docker-java client, in which case CI is the source of truth for that one
+test rather than your local machine).
 
 ## Running it locally
 
