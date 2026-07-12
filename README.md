@@ -2,16 +2,20 @@
 
 [![CI](https://github.com/amritshukla001/payment-orchestration/actions/workflows/ci.yml/badge.svg)](https://github.com/amritshukla001/payment-orchestration/actions/workflows/ci.yml)
 
-A saga-based, event-driven payment orchestration system — a portfolio project
-demonstrating the same architecture patterns used in production banking
-systems (event-driven microservices, workflow orchestration, idempotent
-consumers) applied to original, non-proprietary domain logic.
+A backend system-design playground — a portfolio project built to
+deliberately exercise as broad a range of real HLD and LLD concepts as
+possible, not to showcase one pattern. A payments-processing pipeline is
+the vehicle here, not the point: distributed-transaction patterns,
+event-driven architecture, and classic OOP design patterns are what it's
+actually about, applied to original, non-proprietary domain logic.
 
-A payment moves through a chain of independent services — fraud check, funds
-authorization, ledger posting, settlement, notification — coordinated by a
-saga orchestrator rather than direct service-to-service calls. If any step
-fails, previously completed steps are unwound via compensating actions
-instead of leaving the system in a half-done state.
+Structurally, a payment moves through a chain of independent services —
+fraud check, funds authorization, ledger posting, settlement,
+notification — coordinated by a saga orchestrator. That's one pattern
+among several in play (see [Concepts & patterns demonstrated](#concepts--patterns-demonstrated)
+below) rather than the whole story. If any step fails, previously
+completed steps are unwound via compensating actions instead of leaving
+the system in a half-done state.
 
 ## Architecture
 
@@ -59,6 +63,48 @@ Each service owns its own Postgres database (`payflow`, `orchestrator`,
 `fraud`, `fundsauth`, `ledger`), even though they currently share one
 container for local-dev convenience — mirrors "database per service"
 without needing a separate Postgres instance per service.
+
+## Concepts & patterns demonstrated
+
+**Distributed systems / HLD**
+- **Saga (orchestration, not choreography)** — a central orchestrator owns
+  the state machine rather than scattering the payment lifecycle across
+  every service's event handlers; see the tradeoff this was chosen over.
+- **Transactional Outbox** — write + outbox row in one DB transaction,
+  published by a separate poller, avoiding the dual-write problem between
+  a database and Kafka.
+- **Idempotent Consumer** — every consumer checks its own `processed_events`
+  table before acting, since Kafka only guarantees at-least-once delivery.
+- **Database per service** — five services, five separate Postgres
+  databases, no shared schema.
+- **Optimistic locking** — `@Version` on `Payment`, `PaymentSagaState`, and
+  `Account` guards concurrent writers without pessimistic locks.
+- **Schema evolution via versioned migrations** — a real schema change
+  (`payment_saga_state` gaining `payee_account`) shipped as a new Flyway
+  `V2` migration, never editing the applied `V1`.
+- **Consistency tradeoffs** — strong (ACID) consistency within each
+  service's own database, eventual consistency across the saga as a whole.
+
+**Classic OOP / LLD (Gang of Four)**
+- **Strategy** — fraud-service's `FraudRule` interface, with
+  `HighValueThresholdRule` and `PositiveAmountRule` as independent
+  `@Component` beans Spring autowires into the engine's rule list.
+- **Mediator** — the saga orchestrator: fraud-service and funds-auth-service
+  never call each other directly, only the orchestrator.
+- **Command** — `CheckFraudCommand`, `AuthorizeFundsCommand`, etc. are
+  requests encapsulated as objects; `ReleaseFundsCommand` is the literal
+  *undo* counterpart to `AuthorizeFundsCommand`.
+- **Factory Method** — static factories on result types (`Verdict.approve()` /
+  `.reject()`), and Spring's `ConsumerFactory`/`ProducerFactory` beans.
+- **Repository** — every `JpaRepository` interface.
+- **Singleton** — every Spring-managed `@Component`/`@Service` bean.
+
+Not every pattern fits everywhere, and forcing one in where it doesn't
+belong would defeat the point — some (Observer, Decorator, Template Method)
+are deliberately not used here; where a pattern is architecturally implied
+but not hand-rolled (Kafka pub/sub *is* an Observer relationship, but
+nothing here reimplements `Observer`/`Listener` in Java), that distinction
+is worth being explicit about rather than overclaiming it.
 
 ## Status
 
