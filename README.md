@@ -23,11 +23,13 @@ the system in a half-done state.
 Client → Payment API (+ outbox) → Kafka: payment.events
                                           │
                                    Saga Orchestrator ⇄ Kafka: payment.commands
-                                          │                    │            │            │
-                          ┌───────────────┼────────────┬───────┴────┬───────┘            │
-                          ▼               ▼             ▼            ▼                   ▼
-                    Fraud Service   Funds Auth    Ledger Service  (Settlement,      (Notification,
-                                                                    planned)          planned)
+                                          │           │            │           │
+                          ┌───────────────┼───────────┴───┬────────┴───┬───────┘
+                          ▼               ▼                ▼           ▼
+                    Fraud Service   Funds Auth        Ledger        Settlement
+                                                       Service        Service
+                                                                        │
+                                    (orchestrator loops back with POST_FINAL_LEDGER)
 ```
 
 - **payment-api** — REST intake. Validates a request, persists it, and
@@ -46,11 +48,17 @@ Client → Payment API (+ outbox) → Kafka: payment.events
   implements the `RELEASE_FUNDS` handler ahead of the compensation logic
   that will call it.
 - **ledger-service** — append-only double-entry ledger. Posts the HOLD leg
-  (debit payer, credit a fixed suspense account) when funds are authorized;
-  settlement-service (a later phase) will post the matching FINAL leg
-  (debit suspense, credit payee) to complete the capture. Nothing here is
-  ever updated — a correction would be a new offsetting entry, never a
-  mutation of history.
+  (debit payer, credit a fixed suspense account) when funds are authorized,
+  and the FINAL leg (debit suspense, credit payee) once settlement confirms
+  capture. Nothing here is ever updated — a correction would be a new
+  offsetting entry, never a mutation of history.
+- **settlement-service** — confirms capture: records its own `settlements`
+  row (distinct from the ledger's postings) and publishes `PAYMENT_SETTLED`.
+  The orchestrator marks the payment `SETTLED` immediately on that event —
+  terminal from the payer/payee's perspective — then separately tells
+  ledger-service to post the FINAL leg as a bookkeeping step that follows
+  behind rather than gates the terminal state, mirroring how real
+  settlement and ledger close can lag each other slightly.
 - **common** — shared event/command contracts (`EventEnvelope`, `PaymentState`,
   event and command records) used by every service.
 
@@ -60,9 +68,9 @@ at-least-once delivery, so idempotent processing is what makes redelivery
 safe rather than a source of duplicate work.
 
 Each service owns its own Postgres database (`payflow`, `orchestrator`,
-`fraud`, `fundsauth`, `ledger`), even though they currently share one
-container for local-dev convenience — mirrors "database per service"
-without needing a separate Postgres instance per service.
+`fraud`, `fundsauth`, `ledger`, `settlement`), even though they currently
+share one container for local-dev convenience — mirrors "database per
+service" without needing a separate Postgres instance per service.
 
 ## Concepts & patterns demonstrated
 
@@ -75,7 +83,7 @@ without needing a separate Postgres instance per service.
   a database and Kafka.
 - **Idempotent Consumer** — every consumer checks its own `processed_events`
   table before acting, since Kafka only guarantees at-least-once delivery.
-- **Database per service** — five services, five separate Postgres
+- **Database per service** — six services, six separate Postgres
   databases, no shared schema.
 - **Optimistic locking** — `@Version` on `Payment`, `PaymentSagaState`, and
   `Account` guards concurrent writers without pessimistic locks.
@@ -109,16 +117,16 @@ is worth being explicit about rather than overclaiming it.
 ## Status
 
 **Built:** `payment-api`, `saga-orchestrator`, `fraud-service`,
-`funds-auth-service`, `ledger-service` — a payment can flow from intake
-through fraud approval, funds authorization, and a real double-entry ledger
-posting to `LEDGER_POSTED`, verified end-to-end against real Kafka and
-Postgres, not just compiled. All rejection branches (fraud threshold,
-insufficient funds) verified too.
+`funds-auth-service`, `ledger-service`, `settlement-service` — the full
+happy path now works: a payment flows from intake through fraud approval,
+funds authorization, ledger HOLD posting, settlement capture, and a final
+double-entry ledger posting all the way to the terminal `SETTLED` state,
+verified end-to-end against real Kafka and Postgres, not just compiled.
+All rejection branches (fraud threshold, insufficient funds) verified too.
 
-**Not built yet:** `settlement-service`, `notification-service`,
-compensation/rollback wiring for mid-saga failures (funds-auth-service
-already implements the `RELEASE_FUNDS` handler ahead of this), and a
-React + AG Grid dashboard.
+**Not built yet:** `notification-service`, compensation/rollback wiring for
+mid-saga failures (funds-auth-service already implements the
+`RELEASE_FUNDS` handler ahead of this), and a React + AG Grid dashboard.
 
 **Also on the roadmap** — the difference between a demo and something that
 reads as production-grade:
@@ -139,14 +147,15 @@ end — every phase since `fraud-service` has shipped with its own tests.
 - **Unit tests** (JUnit 5 + Mockito) for pure logic and mockable
   collaborators: fraud-service's `FraudRule` strategies and rule engine,
   funds-auth-service's `MockBankLedger` (reserve/release/insufficient-funds),
-  ledger-service's `DoubleEntryLedger`, and — the most important one —
-  saga-orchestrator's `PaymentEventListener`, covering every state
-  transition (`INITIATED → FRAUD_CHECKED → AUTHORIZED → LEDGER_POSTED`,
-  both `FAILED` branches, idempotent redelivery, and unknown-payment
-  handling). That last suite is the **regression pack** for the saga: every
-  scenario in it mirrors something that was previously verified by hand
-  with curl + psql, now automated so a future change can't silently break
-  it without CI catching it.
+  ledger-service's `DoubleEntryLedger` (both HOLD and FINAL legs),
+  settlement-service's `SettleCommandListener`, and — the most important
+  one — saga-orchestrator's `PaymentEventListener`, covering every state
+  transition (`INITIATED → FRAUD_CHECKED → AUTHORIZED → LEDGER_POSTED →
+  SETTLED`), both `FAILED` branches, idempotent redelivery, and
+  unknown-payment handling. That last suite is the **regression pack** for
+  the saga: every scenario in it mirrors something that was previously
+  verified by hand with curl + psql, now automated so a future change
+  can't silently break it without CI catching it.
 - **Integration test** (Testcontainers — real Postgres + real Kafka, not
   mocks) for payment-api: posts a real payment over HTTP, confirms it's
   persisted, confirms the outbox actually published to a live Kafka topic,
@@ -177,6 +186,7 @@ cd saga-orchestrator && mvn spring-boot:run    # :8082
 cd fraud-service && mvn spring-boot:run        # :8083
 cd funds-auth-service && mvn spring-boot:run   # :8084
 cd ledger-service && mvn spring-boot:run       # :8085
+cd settlement-service && mvn spring-boot:run   # :8086
 ```
 
 Kafka UI is at http://localhost:8081 for browsing topics/messages directly.
@@ -190,8 +200,9 @@ curl -i -X POST http://localhost:8080/payments \
   -d '{"payerAccount":"11111111-1111-1111-1111-111111111111","payeeAccount":"22222222-2222-2222-2222-222222222222","amountCents":2500,"currency":"USD"}'
 ```
 
-Amounts over $10,000 (`amountCents > 1000000`) get rejected by the fraud
-rule — try it to see the saga end in `FAILED` instead.
+A normal amount like the above reaches `SETTLED` within a couple of
+seconds. Amounts over $10,000 (`amountCents > 1000000`) get rejected by the
+fraud rule instead — try it to see the saga end in `FAILED`.
 
 ```bash
 curl http://localhost:8080/payments/<id>
@@ -205,11 +216,18 @@ docker exec payflow-postgres psql -U payflow -d orchestrator \
   -c "SELECT payment_id, state FROM payment_saga_state;"
 ```
 
-Check the actual ledger posting:
+Check both ledger legs (HOLD then FINAL):
 
 ```bash
 docker exec payflow-postgres psql -U payflow -d ledger \
-  -c "SELECT payment_id, debit_account, credit_account, amount_cents, posting_type FROM ledger_entries;"
+  -c "SELECT payment_id, debit_account, credit_account, amount_cents, posting_type FROM ledger_entries ORDER BY posted_at;"
+```
+
+Check the settlement capture record:
+
+```bash
+docker exec payflow-postgres psql -U payflow -d settlement \
+  -c "SELECT payment_id, amount_cents, captured_at FROM settlements;"
 ```
 
 ## Tech stack
