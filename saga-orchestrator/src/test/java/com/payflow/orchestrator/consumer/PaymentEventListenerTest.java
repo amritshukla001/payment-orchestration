@@ -5,7 +5,9 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.datatype.jsr310.JavaTimeModule;
 import com.payflow.common.commands.AuthorizeFundsCommand;
 import com.payflow.common.commands.CheckFraudCommand;
+import com.payflow.common.commands.PostFinalLedgerCommand;
 import com.payflow.common.commands.PostLedgerCommand;
+import com.payflow.common.commands.SettleCommand;
 import com.payflow.common.enums.PaymentState;
 import com.payflow.common.events.*;
 import com.payflow.orchestrator.domain.PaymentSagaState;
@@ -141,7 +143,7 @@ class PaymentEventListenerTest {
     }
 
     @Test
-    void ledgerPostedAdvancesToLedgerPosted() throws Exception {
+    void ledgerPostedAdvancesToLedgerPostedAndIssuesSettle() throws Exception {
         UUID paymentId = UUID.randomUUID();
         PaymentSagaState existing = existingState(paymentId, PaymentState.AUTHORIZED);
         when(sagaStateRepository.findById(paymentId)).thenReturn(Optional.of(existing));
@@ -150,8 +152,36 @@ class PaymentEventListenerTest {
                 new LedgerPostedEvent(paymentId, Instant.now())), ack);
 
         assertThat(existing.getState()).isEqualTo(PaymentState.LEDGER_POSTED);
-        // No further command yet -- settlement-service doesn't exist; the saga deliberately pauses here.
-        verify(kafkaTemplate, never()).send(anyString(), anyString(), anyString());
+        SettleCommand command = capturedCommand(paymentId, "SETTLE", SettleCommand.class);
+        assertThat(command.payeeAccount()).isEqualTo(existing.getPayeeAccount());
+    }
+
+    @Test
+    void paymentSettledAdvancesToSettledAndIssuesPostFinalLedger() throws Exception {
+        UUID paymentId = UUID.randomUUID();
+        PaymentSagaState existing = existingState(paymentId, PaymentState.LEDGER_POSTED);
+        when(sagaStateRepository.findById(paymentId)).thenReturn(Optional.of(existing));
+
+        listener.onEvent(recordFor(paymentId, PaymentEventType.PAYMENT_SETTLED,
+                new PaymentSettledEvent(paymentId, Instant.now())), ack);
+
+        assertThat(existing.getState()).isEqualTo(PaymentState.SETTLED);
+        PostFinalLedgerCommand command = capturedCommand(paymentId, "POST_FINAL_LEDGER", PostFinalLedgerCommand.class);
+        assertThat(command.payeeAccount()).isEqualTo(existing.getPayeeAccount());
+    }
+
+    @Test
+    void ledgerFinalizedIsInformationalAndDoesNotChangeSagaState() throws Exception {
+        UUID paymentId = UUID.randomUUID();
+        // LEDGER_FINALIZED is deliberately not looked up in the repository at
+        // all -- it's a pure audit-log signal, so no findById should even happen.
+
+        listener.onEvent(recordFor(paymentId, PaymentEventType.LEDGER_FINALIZED,
+                new LedgerFinalizedEvent(paymentId, Instant.now())), ack);
+
+        verifyNoInteractions(sagaStateRepository);
+        verifyNoInteractions(kafkaTemplate);
+        verify(ack).acknowledge();
     }
 
     @Test

@@ -9,10 +9,10 @@ import java.time.Instant;
 import java.util.UUID;
 
 /**
- * Posts the HOLD leg of a payment: debit payer, credit the suspense
- * account. A real settlement-service (later phase) would post the
- * matching FINAL leg — debit suspense, credit payee — to complete the
- * double entry. Every posting is a new row; nothing here is ever updated.
+ * Posts both legs of a payment's double entry: HOLD (debit payer, credit
+ * suspense) at authorization time, FINAL (debit suspense, credit payee)
+ * once settlement confirms capture. Every posting is a new row; nothing
+ * here is ever updated.
  */
 @Component
 public class DoubleEntryLedger {
@@ -35,5 +35,14 @@ public class DoubleEntryLedger {
         ledgerEntryRepository.save(new LedgerEntry(
                 UUID.randomUUID(), paymentId, payerAccount, SUSPENSE_ACCOUNT,
                 amountCents, PostingType.HOLD, Instant.now()));
+    }
+
+    public void postFinal(UUID paymentId, UUID payeeAccount, long amountCents) {
+        if (ledgerEntryRepository.existsByPaymentIdAndPostingType(paymentId, PostingType.FINAL)) {
+            return; // already posted — safe no-op on redelivery
+        }
+        ledgerEntryRepository.save(new LedgerEntry(
+                UUID.randomUUID(), paymentId, SUSPENSE_ACCOUNT, payeeAccount,
+                amountCents, PostingType.FINAL, Instant.now()));
     }
 }

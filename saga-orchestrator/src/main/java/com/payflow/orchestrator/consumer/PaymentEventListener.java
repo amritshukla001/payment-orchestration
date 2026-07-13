@@ -3,7 +3,9 @@ package com.payflow.orchestrator.consumer;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.payflow.common.commands.AuthorizeFundsCommand;
 import com.payflow.common.commands.CheckFraudCommand;
+import com.payflow.common.commands.PostFinalLedgerCommand;
 import com.payflow.common.commands.PostLedgerCommand;
+import com.payflow.common.commands.SettleCommand;
 import com.payflow.common.enums.PaymentState;
 import com.payflow.common.events.EventEnvelope;
 import com.payflow.common.events.FraudRejectedEvent;
@@ -84,6 +86,8 @@ public class PaymentEventListener {
             case FUNDS_AUTHORIZED -> onFundsAuthorized(envelope);
             case FUNDS_AUTHORIZATION_FAILED -> onFundsAuthorizationFailed(envelope);
             case LEDGER_POSTED -> onLedgerPosted(envelope);
+            case PAYMENT_SETTLED -> onPaymentSettled(envelope);
+            case LEDGER_FINALIZED -> onLedgerFinalized(envelope);
             default -> log.info("No saga handling wired up yet for {}", type);
         }
     }
@@ -150,17 +154,49 @@ public class PaymentEventListener {
         log.info("Payment {} AUTHORIZED -> issued POST_LEDGER", paymentId);
     }
 
-    private void onLedgerPosted(EventEnvelope envelope) {
+    private void onLedgerPosted(EventEnvelope envelope) throws Exception {
         UUID paymentId = envelope.aggregateId();
-        sagaStateRepository.findById(paymentId).ifPresentOrElse(
-                state -> {
-                    state.advanceTo(PaymentState.LEDGER_POSTED, Instant.now());
-                    sagaStateRepository.save(state);
-                    log.info("Payment {} advanced to LEDGER_POSTED (settlement-service not built yet — saga pauses here)",
-                            paymentId);
-                },
-                () -> log.warn("Received LEDGER_POSTED for unknown payment {}", paymentId)
-        );
+        PaymentSagaState state = sagaStateRepository.findById(paymentId).orElse(null);
+        if (state == null) {
+            log.warn("Received LEDGER_POSTED for unknown payment {}", paymentId);
+            return;
+        }
+
+        state.advanceTo(PaymentState.LEDGER_POSTED, Instant.now());
+        sagaStateRepository.save(state);
+
+        SettleCommand command = new SettleCommand(
+                paymentId, state.getPayerAccount(), state.getPayeeAccount(),
+                state.getAmountCents(), state.getCurrency(), Instant.now());
+        publishCommand(paymentId, "SETTLE", command);
+        log.info("Payment {} LEDGER_POSTED -> issued SETTLE", paymentId);
+    }
+
+    private void onPaymentSettled(EventEnvelope envelope) throws Exception {
+        UUID paymentId = envelope.aggregateId();
+        PaymentSagaState state = sagaStateRepository.findById(paymentId).orElse(null);
+        if (state == null) {
+            log.warn("Received PAYMENT_SETTLED for unknown payment {}", paymentId);
+            return;
+        }
+
+        // SETTLED is terminal from the payer/payee's perspective the moment
+        // capture is confirmed. Converting the ledger's HOLD into a FINAL
+        // posting is bookkeeping that follows behind it, not a gate on
+        // reaching this state -- mirrors how real settlement and ledger
+        // close can lag each other slightly.
+        state.advanceTo(PaymentState.SETTLED, Instant.now());
+        sagaStateRepository.save(state);
+
+        PostFinalLedgerCommand command = new PostFinalLedgerCommand(
+                paymentId, state.getPayeeAccount(), state.getAmountCents(), Instant.now());
+        publishCommand(paymentId, "POST_FINAL_LEDGER", command);
+        log.info("Payment {} SETTLED -> issued POST_FINAL_LEDGER", paymentId);
+    }
+
+    private void onLedgerFinalized(EventEnvelope envelope) {
+        log.info("Payment {} ledger FINAL leg confirmed (informational — does not change saga state)",
+                envelope.aggregateId());
     }
 
     private void onFundsAuthorizationFailed(EventEnvelope envelope) throws Exception {

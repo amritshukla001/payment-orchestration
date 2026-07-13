@@ -36,6 +36,7 @@
     <module>fraud-service</module>
     <module>funds-auth-service</module>
     <module>ledger-service</module>
+    <module>settlement-service</module>
   </modules>
 
   <dependencyManagement>

@@ -53,4 +53,30 @@ class DoubleEntryLedgerTest {
 
         verify(ledgerEntryRepository, never()).save(org.mockito.ArgumentMatchers.any());
     }
+
+    @Test
+    void postsAFinalEntryDebitingTheSuspenseAccountAndCreditingThePayee() {
+        UUID paymentId = UUID.randomUUID();
+        UUID payeeAccount = UUID.randomUUID();
+        when(ledgerEntryRepository.existsByPaymentIdAndPostingType(paymentId, PostingType.FINAL)).thenReturn(false);
+
+        ledger().postFinal(paymentId, payeeAccount, 4_500L);
+
+        ArgumentCaptor<LedgerEntry> captor = ArgumentCaptor.forClass(LedgerEntry.class);
+        verify(ledgerEntryRepository).save(captor.capture());
+        LedgerEntry saved = captor.getValue();
+        assertThat(saved.getDebitAccount()).isEqualTo(DoubleEntryLedger.SUSPENSE_ACCOUNT);
+        assertThat(saved.getCreditAccount()).isEqualTo(payeeAccount);
+        assertThat(saved.getPostingType()).isEqualTo(PostingType.FINAL);
+    }
+
+    @Test
+    void postFinalIsIdempotentAgainstARedeliveredCommand() {
+        UUID paymentId = UUID.randomUUID();
+        when(ledgerEntryRepository.existsByPaymentIdAndPostingType(paymentId, PostingType.FINAL)).thenReturn(true);
+
+        ledger().postFinal(paymentId, UUID.randomUUID(), 4_500L);
+
+        verify(ledgerEntryRepository, never()).save(org.mockito.ArgumentMatchers.any());
+    }
 }

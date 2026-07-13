@@ -10,5 +10,6 @@ public enum CommandType {
     AUTHORIZE_FUNDS,
     POST_LEDGER,
     SETTLE,
+    POST_FINAL_LEDGER,
     RELEASE_FUNDS
 }

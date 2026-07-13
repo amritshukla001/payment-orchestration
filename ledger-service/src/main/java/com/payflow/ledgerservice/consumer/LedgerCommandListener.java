@@ -1,8 +1,10 @@
 package com.payflow.ledgerservice.consumer;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.payflow.common.commands.PostFinalLedgerCommand;
 import com.payflow.common.commands.PostLedgerCommand;
 import com.payflow.common.events.EventEnvelope;
+import com.payflow.common.events.LedgerFinalizedEvent;
 import com.payflow.common.events.LedgerPostedEvent;
 import com.payflow.common.events.PaymentEventType;
 import com.payflow.ledgerservice.domain.ProcessedEvent;
@@ -21,9 +23,9 @@ import java.time.Instant;
 import java.util.UUID;
 
 @Component
-public class PostLedgerCommandListener {
+public class LedgerCommandListener {
 
-    private static final Logger log = LoggerFactory.getLogger(PostLedgerCommandListener.class);
+    private static final Logger log = LoggerFactory.getLogger(LedgerCommandListener.class);
     private static final String EVENTS_TOPIC = "payment.events";
 
     private final ProcessedEventRepository processedEventRepository;
@@ -31,10 +33,10 @@ public class PostLedgerCommandListener {
     private final KafkaTemplate<String, String> kafkaTemplate;
     private final ObjectMapper objectMapper;
 
-    public PostLedgerCommandListener(ProcessedEventRepository processedEventRepository,
-                                      DoubleEntryLedger ledger,
-                                      KafkaTemplate<String, String> kafkaTemplate,
-                                      ObjectMapper objectMapper) {
+    public LedgerCommandListener(ProcessedEventRepository processedEventRepository,
+                                  DoubleEntryLedger ledger,
+                                  KafkaTemplate<String, String> kafkaTemplate,
+                                  ObjectMapper objectMapper) {
         this.processedEventRepository = processedEventRepository;
         this.ledger = ledger;
         this.kafkaTemplate = kafkaTemplate;
@@ -47,21 +49,17 @@ public class PostLedgerCommandListener {
         try {
             EventEnvelope envelope = objectMapper.readValue(record.value(), EventEnvelope.class);
 
-            if (!"POST_LEDGER".equals(envelope.eventType())) {
-                ack.acknowledge();
-                return;
-            }
             if (processedEventRepository.existsById(envelope.eventId())) {
                 log.debug("Skipping already-processed command {}", envelope.eventId());
                 ack.acknowledge();
                 return;
             }
 
-            PostLedgerCommand command = objectMapper.treeToValue(envelope.payload(), PostLedgerCommand.class);
-            ledger.postHold(command.paymentId(), command.payerAccount(), command.amountCents());
-
-            publish(command.paymentId(), new LedgerPostedEvent(command.paymentId(), Instant.now()));
-            log.info("Payment {} ledger HOLD posted", command.paymentId());
+            switch (envelope.eventType()) {
+                case "POST_LEDGER" -> handlePostLedger(envelope);
+                case "POST_FINAL_LEDGER" -> handlePostFinalLedger(envelope);
+                default -> { /* not for us */ }
+            }
 
             processedEventRepository.save(new ProcessedEvent(envelope.eventId(), Instant.now()));
             ack.acknowledge();
@@ -70,11 +68,25 @@ public class PostLedgerCommandListener {
         }
     }
 
-    private void publish(UUID paymentId, Object payload) throws Exception {
+    private void handlePostLedger(EventEnvelope envelope) throws Exception {
+        PostLedgerCommand command = objectMapper.treeToValue(envelope.payload(), PostLedgerCommand.class);
+        ledger.postHold(command.paymentId(), command.payerAccount(), command.amountCents());
+        publish(command.paymentId(), PaymentEventType.LEDGER_POSTED, new LedgerPostedEvent(command.paymentId(), Instant.now()));
+        log.info("Payment {} ledger HOLD posted", command.paymentId());
+    }
+
+    private void handlePostFinalLedger(EventEnvelope envelope) throws Exception {
+        PostFinalLedgerCommand command = objectMapper.treeToValue(envelope.payload(), PostFinalLedgerCommand.class);
+        ledger.postFinal(command.paymentId(), command.payeeAccount(), command.amountCents());
+        publish(command.paymentId(), PaymentEventType.LEDGER_FINALIZED, new LedgerFinalizedEvent(command.paymentId(), Instant.now()));
+        log.info("Payment {} ledger FINAL posted", command.paymentId());
+    }
+
+    private void publish(UUID paymentId, PaymentEventType type, Object payload) throws Exception {
         EventEnvelope envelope = new EventEnvelope(
                 UUID.randomUUID(),
                 paymentId,
-                PaymentEventType.LEDGER_POSTED.name(),
+                type.name(),
                 Instant.now(),
                 objectMapper.valueToTree(payload)
         );
