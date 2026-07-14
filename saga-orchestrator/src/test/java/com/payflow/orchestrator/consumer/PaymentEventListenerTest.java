@@ -103,7 +103,7 @@ class PaymentEventListenerTest {
     }
 
     @Test
-    void fraudRejectedEndsTheSagaInFailed() throws Exception {
+    void fraudRejectedEndsTheSagaInFailedAndPublishesPaymentFailed() throws Exception {
         UUID paymentId = UUID.randomUUID();
         PaymentSagaState existing = existingState(paymentId, PaymentState.INITIATED);
         when(sagaStateRepository.findById(paymentId)).thenReturn(Optional.of(existing));
@@ -112,7 +112,9 @@ class PaymentEventListenerTest {
                 new FraudRejectedEvent(paymentId, "over threshold", Instant.now())), ack);
 
         assertThat(existing.getState()).isEqualTo(PaymentState.FAILED);
-        verify(kafkaTemplate, never()).send(anyString(), anyString(), anyString());
+        PaymentFailedEvent event = capturedEvent(paymentId, "PAYMENT_FAILED", PaymentFailedEvent.class);
+        assertThat(event.payerAccount()).isEqualTo(existing.getPayerAccount());
+        assertThat(event.reason()).isEqualTo("over threshold");
     }
 
     @Test
@@ -130,7 +132,7 @@ class PaymentEventListenerTest {
     }
 
     @Test
-    void fundsAuthorizationFailedEndsTheSagaInFailed() throws Exception {
+    void fundsAuthorizationFailedEndsTheSagaInFailedAndPublishesPaymentFailed() throws Exception {
         UUID paymentId = UUID.randomUUID();
         PaymentSagaState existing = existingState(paymentId, PaymentState.FRAUD_CHECKED);
         when(sagaStateRepository.findById(paymentId)).thenReturn(Optional.of(existing));
@@ -139,7 +141,9 @@ class PaymentEventListenerTest {
                 new FundsAuthorizationFailedEvent(paymentId, "insufficient funds", Instant.now())), ack);
 
         assertThat(existing.getState()).isEqualTo(PaymentState.FAILED);
-        verify(kafkaTemplate, never()).send(anyString(), anyString(), anyString());
+        PaymentFailedEvent event = capturedEvent(paymentId, "PAYMENT_FAILED", PaymentFailedEvent.class);
+        assertThat(event.payerAccount()).isEqualTo(existing.getPayerAccount());
+        assertThat(event.reason()).isEqualTo("insufficient funds");
     }
 
     @Test
@@ -163,7 +167,7 @@ class PaymentEventListenerTest {
         when(sagaStateRepository.findById(paymentId)).thenReturn(Optional.of(existing));
 
         listener.onEvent(recordFor(paymentId, PaymentEventType.PAYMENT_SETTLED,
-                new PaymentSettledEvent(paymentId, Instant.now())), ack);
+                new PaymentSettledEvent(paymentId, existing.getPayerAccount(), existing.getPayeeAccount(), Instant.now())), ack);
 
         assertThat(existing.getState()).isEqualTo(PaymentState.SETTLED);
         PostFinalLedgerCommand command = capturedCommand(paymentId, "POST_FINAL_LEDGER", PostFinalLedgerCommand.class);
@@ -230,8 +234,16 @@ class PaymentEventListenerTest {
     }
 
     private <T> T capturedCommand(UUID paymentId, String expectedType, Class<T> payloadType) throws Exception {
+        return capturedMessage("payment.commands", paymentId, expectedType, payloadType);
+    }
+
+    private <T> T capturedEvent(UUID paymentId, String expectedType, Class<T> payloadType) throws Exception {
+        return capturedMessage("payment.events", paymentId, expectedType, payloadType);
+    }
+
+    private <T> T capturedMessage(String topic, UUID paymentId, String expectedType, Class<T> payloadType) throws Exception {
         ArgumentCaptor<String> jsonCaptor = ArgumentCaptor.forClass(String.class);
-        verify(kafkaTemplate).send(eq("payment.commands"), eq(paymentId.toString()), jsonCaptor.capture());
+        verify(kafkaTemplate).send(eq(topic), eq(paymentId.toString()), jsonCaptor.capture());
         EventEnvelope envelope = objectMapper.readValue(jsonCaptor.getValue(), EventEnvelope.class);
         assertThat(envelope.eventType()).isEqualTo(expectedType);
         JsonNode payload = envelope.payload();

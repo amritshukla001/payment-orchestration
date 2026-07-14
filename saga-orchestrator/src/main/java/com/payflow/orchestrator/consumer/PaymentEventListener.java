@@ -11,6 +11,7 @@ import com.payflow.common.events.EventEnvelope;
 import com.payflow.common.events.FraudRejectedEvent;
 import com.payflow.common.events.FundsAuthorizationFailedEvent;
 import com.payflow.common.events.PaymentEventType;
+import com.payflow.common.events.PaymentFailedEvent;
 import com.payflow.common.events.PaymentInitiatedEvent;
 import com.payflow.orchestrator.domain.PaymentSagaState;
 import com.payflow.orchestrator.domain.ProcessedEvent;
@@ -38,6 +39,7 @@ public class PaymentEventListener {
 
     private static final Logger log = LoggerFactory.getLogger(PaymentEventListener.class);
     private static final String COMMANDS_TOPIC = "payment.commands";
+    private static final String EVENTS_TOPIC = "payment.events";
 
     private final PaymentSagaStateRepository sagaStateRepository;
     private final ProcessedEventRepository processedEventRepository;
@@ -126,14 +128,7 @@ public class PaymentEventListener {
 
     private void onFraudRejected(EventEnvelope envelope) throws Exception {
         FraudRejectedEvent event = objectMapper.treeToValue(envelope.payload(), FraudRejectedEvent.class);
-        sagaStateRepository.findById(event.paymentId()).ifPresentOrElse(
-                state -> {
-                    state.advanceTo(PaymentState.FAILED, Instant.now());
-                    sagaStateRepository.save(state);
-                    log.info("Payment {} FAILED — fraud rejected: {}", event.paymentId(), event.reason());
-                },
-                () -> log.warn("Received FRAUD_REJECTED for unknown payment {}", event.paymentId())
-        );
+        failSaga(event.paymentId(), event.reason(), "fraud rejected");
     }
 
     private void onFundsAuthorized(EventEnvelope envelope) throws Exception {
@@ -202,15 +197,22 @@ public class PaymentEventListener {
     private void onFundsAuthorizationFailed(EventEnvelope envelope) throws Exception {
         FundsAuthorizationFailedEvent event =
                 objectMapper.treeToValue(envelope.payload(), FundsAuthorizationFailedEvent.class);
-        sagaStateRepository.findById(event.paymentId()).ifPresentOrElse(
-                state -> {
-                    state.advanceTo(PaymentState.FAILED, Instant.now());
-                    sagaStateRepository.save(state);
-                    log.info("Payment {} FAILED — funds authorization rejected: {}",
-                            event.paymentId(), event.reason());
-                },
-                () -> log.warn("Received FUNDS_AUTHORIZATION_FAILED for unknown payment {}", event.paymentId())
-        );
+        failSaga(event.paymentId(), event.reason(), "funds authorization rejected");
+    }
+
+    private void failSaga(UUID paymentId, String reason, String logLabel) throws Exception {
+        PaymentSagaState state = sagaStateRepository.findById(paymentId).orElse(null);
+        if (state == null) {
+            log.warn("Received a failure signal for unknown payment {}", paymentId);
+            return;
+        }
+
+        state.advanceTo(PaymentState.FAILED, Instant.now());
+        sagaStateRepository.save(state);
+        log.info("Payment {} FAILED — {}: {}", paymentId, logLabel, reason);
+
+        publishEvent(paymentId, PaymentEventType.PAYMENT_FAILED,
+                new PaymentFailedEvent(paymentId, state.getPayerAccount(), reason, Instant.now()));
     }
 
     private void publishCommand(UUID paymentId, String commandType, Object payload) throws Exception {
@@ -222,5 +224,16 @@ public class PaymentEventListener {
                 objectMapper.valueToTree(payload)
         );
         kafkaTemplate.send(COMMANDS_TOPIC, paymentId.toString(), objectMapper.writeValueAsString(envelope)).get();
+    }
+
+    private void publishEvent(UUID paymentId, PaymentEventType type, Object payload) throws Exception {
+        EventEnvelope envelope = new EventEnvelope(
+                UUID.randomUUID(),
+                paymentId,
+                type.name(),
+                Instant.now(),
+                objectMapper.valueToTree(payload)
+        );
+        kafkaTemplate.send(EVENTS_TOPIC, paymentId.toString(), objectMapper.writeValueAsString(envelope)).get();
     }
 }

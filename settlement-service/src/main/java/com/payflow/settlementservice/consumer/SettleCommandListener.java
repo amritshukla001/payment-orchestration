@@ -60,7 +60,8 @@ public class SettleCommandListener {
 
             SettleCommand command = objectMapper.treeToValue(envelope.payload(), SettleCommand.class);
             recordCapture(command);
-            publish(command.paymentId(), new PaymentSettledEvent(command.paymentId(), Instant.now()));
+            publish(command.paymentId(), new PaymentSettledEvent(
+                    command.paymentId(), command.payerAccount(), command.payeeAccount(), Instant.now()));
             log.info("Payment {} SETTLED (captured)", command.paymentId());
 
             processedEventRepository.save(new ProcessedEvent(envelope.eventId(), Instant.now()));

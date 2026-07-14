@@ -6,3 +6,4 @@ CREATE DATABASE fraud;
 CREATE DATABASE fundsauth;
 CREATE DATABASE ledger;
 CREATE DATABASE settlement;
+CREATE DATABASE notification;

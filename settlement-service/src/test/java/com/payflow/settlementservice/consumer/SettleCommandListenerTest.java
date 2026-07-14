@@ -53,8 +53,10 @@ class SettleCommandListenerTest {
     @Test
     void recordsCaptureAndPublishesPaymentSettled() throws Exception {
         UUID paymentId = UUID.randomUUID();
+        UUID payerAccount = UUID.randomUUID();
+        UUID payeeAccount = UUID.randomUUID();
         SettleCommand command = new SettleCommand(
-                paymentId, UUID.randomUUID(), UUID.randomUUID(), 4_500L, "USD", Instant.now());
+                paymentId, payerAccount, payeeAccount, 4_500L, "USD", Instant.now());
         when(settlementRepository.existsById(paymentId)).thenReturn(false);
 
         listener.onCommand(recordFor(paymentId, command), ack);
@@ -70,6 +72,8 @@ class SettleCommandListenerTest {
         assertThat(published.eventType()).isEqualTo("PAYMENT_SETTLED");
         PaymentSettledEvent event = objectMapper.treeToValue(published.payload(), PaymentSettledEvent.class);
         assertThat(event.paymentId()).isEqualTo(paymentId);
+        assertThat(event.payerAccount()).isEqualTo(payerAccount);
+        assertThat(event.payeeAccount()).isEqualTo(payeeAccount);
 
         verify(ack).acknowledge();
     }
