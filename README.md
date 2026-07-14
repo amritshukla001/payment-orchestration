@@ -20,9 +20,10 @@ the system in a half-done state.
 ## Architecture
 
 ```
-Client → Payment API (+ outbox) → Kafka: payment.events
-                                          │
-                                   Saga Orchestrator ⇄ Kafka: payment.commands
+Client → Payment API (+ outbox) → Kafka: payment.events ⇄ Notification Service
+                                          │                  (passive observer,
+                                   Saga Orchestrator          no command needed)
+                                          ⇄ Kafka: payment.commands
                                           │           │            │           │
                           ┌───────────────┼───────────┴───┬────────┴───┬───────┘
                           ▼               ▼                ▼           ▼
@@ -59,6 +60,12 @@ Client → Payment API (+ outbox) → Kafka: payment.events
   ledger-service to post the FINAL leg as a bookkeeping step that follows
   behind rather than gates the terminal state, mirroring how real
   settlement and ledger close can lag each other slightly.
+- **notification-service** — architecturally the odd one out: it subscribes
+  directly to `payment.events` for `PAYMENT_SETTLED`/`PAYMENT_FAILED`
+  rather than reacting to an orchestrator-issued command, since nothing
+  depends on a notification succeeding. Notifies both payer and payee on
+  success, payer only on failure. Its Kafka config is consumer-only — no
+  producer, because it never publishes anything back.
 - **common** — shared event/command contracts (`EventEnvelope`, `PaymentState`,
   event and command records) used by every service.
 
@@ -68,9 +75,10 @@ at-least-once delivery, so idempotent processing is what makes redelivery
 safe rather than a source of duplicate work.
 
 Each service owns its own Postgres database (`payflow`, `orchestrator`,
-`fraud`, `fundsauth`, `ledger`, `settlement`), even though they currently
-share one container for local-dev convenience — mirrors "database per
-service" without needing a separate Postgres instance per service.
+`fraud`, `fundsauth`, `ledger`, `settlement`, `notification`), even though
+they currently share one container for local-dev convenience — mirrors
+"database per service" without needing a separate Postgres instance per
+service.
 
 ## Concepts & patterns demonstrated
 
@@ -83,7 +91,7 @@ service" without needing a separate Postgres instance per service.
   a database and Kafka.
 - **Idempotent Consumer** — every consumer checks its own `processed_events`
   table before acting, since Kafka only guarantees at-least-once delivery.
-- **Database per service** — six services, six separate Postgres
+- **Database per service** — seven services, seven separate Postgres
   databases, no shared schema.
 - **Optimistic locking** — `@Version` on `Payment`, `PaymentSagaState`, and
   `Account` guards concurrent writers without pessimistic locks.
@@ -106,27 +114,34 @@ service" without needing a separate Postgres instance per service.
   `.reject()`), and Spring's `ConsumerFactory`/`ProducerFactory` beans.
 - **Repository** — every `JpaRepository` interface.
 - **Singleton** — every Spring-managed `@Component`/`@Service` bean.
+- **Observer** — notification-service subscribes to `payment.events` as a
+  passive observer of terminal outcomes, distinct from every other
+  service's Command-style "react to what the orchestrator explicitly told
+  you to do." Earlier phases of this project noted Kafka pub/sub is
+  *architecturally* Observer-shaped but nothing here hand-rolled it — this
+  is the point where that stopped being true.
 
 Not every pattern fits everywhere, and forcing one in where it doesn't
-belong would defeat the point — some (Observer, Decorator, Template Method)
-are deliberately not used here; where a pattern is architecturally implied
-but not hand-rolled (Kafka pub/sub *is* an Observer relationship, but
-nothing here reimplements `Observer`/`Listener` in Java), that distinction
-is worth being explicit about rather than overclaiming it.
+belong would defeat the point — Decorator and Template Method are
+deliberately not used here; nothing in this codebase needed them.
 
 ## Status
 
-**Built:** `payment-api`, `saga-orchestrator`, `fraud-service`,
-`funds-auth-service`, `ledger-service`, `settlement-service` — the full
-happy path now works: a payment flows from intake through fraud approval,
-funds authorization, ledger HOLD posting, settlement capture, and a final
-double-entry ledger posting all the way to the terminal `SETTLED` state,
-verified end-to-end against real Kafka and Postgres, not just compiled.
-All rejection branches (fraud threshold, insufficient funds) verified too.
+**Built — all 7 core services:** `payment-api`, `saga-orchestrator`,
+`fraud-service`, `funds-auth-service`, `ledger-service`,
+`settlement-service`, `notification-service`. The full happy path works
+end to end: a payment flows from intake through fraud approval, funds
+authorization, ledger HOLD posting, settlement capture, a final
+double-entry ledger posting, and notifications to both parties, all the
+way to the terminal `SETTLED` state — verified against real Kafka and
+Postgres, not just compiled. Both failure branches (fraud threshold,
+insufficient funds) verified too, including the payer-only notification
+on failure.
 
-**Not built yet:** `notification-service`, compensation/rollback wiring for
-mid-saga failures (funds-auth-service already implements the
-`RELEASE_FUNDS` handler ahead of this), and a React + AG Grid dashboard.
+**Not built yet:** compensation/rollback wiring for mid-saga failures
+(funds-auth-service already implements the `RELEASE_FUNDS` handler ahead
+of this — every core service exists now, so this is next), and a
+React + AG Grid dashboard.
 
 **Also on the roadmap** — the difference between a demo and something that
 reads as production-grade:
@@ -148,10 +163,12 @@ end — every phase since `fraud-service` has shipped with its own tests.
   collaborators: fraud-service's `FraudRule` strategies and rule engine,
   funds-auth-service's `MockBankLedger` (reserve/release/insufficient-funds),
   ledger-service's `DoubleEntryLedger` (both HOLD and FINAL legs),
-  settlement-service's `SettleCommandListener`, and — the most important
-  one — saga-orchestrator's `PaymentEventListener`, covering every state
-  transition (`INITIATED → FRAUD_CHECKED → AUTHORIZED → LEDGER_POSTED →
-  SETTLED`), both `FAILED` branches, idempotent redelivery, and
+  settlement-service's `SettleCommandListener`, notification-service's
+  `PaymentOutcomeListener` (both-parties-on-success, payer-only-on-failure),
+  and — the most important one — saga-orchestrator's `PaymentEventListener`,
+  covering every state transition (`INITIATED → FRAUD_CHECKED → AUTHORIZED
+  → LEDGER_POSTED → SETTLED`), both `FAILED` branches (each asserting the
+  `PAYMENT_FAILED` event it publishes), idempotent redelivery, and
   unknown-payment handling. That last suite is the **regression pack** for
   the saga: every scenario in it mirrors something that was previously
   verified by hand with curl + psql, now automated so a future change
@@ -187,6 +204,7 @@ cd fraud-service && mvn spring-boot:run        # :8083
 cd funds-auth-service && mvn spring-boot:run   # :8084
 cd ledger-service && mvn spring-boot:run       # :8085
 cd settlement-service && mvn spring-boot:run   # :8086
+cd notification-service && mvn spring-boot:run # :8087
 ```
 
 Kafka UI is at http://localhost:8081 for browsing topics/messages directly.
@@ -228,6 +246,14 @@ Check the settlement capture record:
 ```bash
 docker exec payflow-postgres psql -U payflow -d settlement \
   -c "SELECT payment_id, amount_cents, captured_at FROM settlements;"
+```
+
+Check who got notified (both payer and payee on success; payer only on a
+`FAILED` payment):
+
+```bash
+docker exec payflow-postgres psql -U payflow -d notification \
+  -c "SELECT payment_id, recipient, outcome, message FROM notifications;"
 ```
 
 ## Tech stack
