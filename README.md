@@ -30,8 +30,13 @@ Client → Payment API (+ outbox) → Kafka: payment.events ⇄ Notification Ser
                     Fraud Service   Funds Auth        Ledger        Settlement
                                                        Service        Service
                                                                         │
-                                    (orchestrator loops back with POST_FINAL_LEDGER)
+                                    (happy path loops back with POST_FINAL_LEDGER)
 ```
+
+**Compensation path** (when settlement declines after funds were already
+authorized — see below): `SETTLEMENT_DECLINED → COMPENSATING → REVERSE_LEDGER
+→ LEDGER_REVERSED → RELEASE_FUNDS → FUNDS_RELEASED → COMPENSATED`, undoing
+steps in the reverse order they were applied.
 
 - **payment-api** — REST intake. Validates a request, persists it, and
   publishes an event via the transactional outbox pattern (write + outbox
@@ -45,27 +50,34 @@ Client → Payment API (+ outbox) → Kafka: payment.events ⇄ Notification Ser
   rule strategies (`FraudRule` implementations, Strategy pattern), publishes
   the verdict back onto `payment.events`.
 - **funds-auth-service** — a mock bank. Lazily provisions accounts on first
-  sight, reserves/releases funds with optimistic locking, and already
-  implements the `RELEASE_FUNDS` handler ahead of the compensation logic
-  that will call it.
+  sight, reserves/releases funds with optimistic locking. Its `RELEASE_FUNDS`
+  handler credits the account back and publishes `FUNDS_RELEASED` — the
+  final step of compensation.
 - **ledger-service** — append-only double-entry ledger. Posts the HOLD leg
   (debit payer, credit a fixed suspense account) when funds are authorized,
-  and the FINAL leg (debit suspense, credit payee) once settlement confirms
-  capture. Nothing here is ever updated — a correction would be a new
-  offsetting entry, never a mutation of history.
+  the FINAL leg (debit suspense, credit payee) once settlement confirms
+  capture, or a REVERSAL leg (debit suspense, credit payer — the exact
+  inverse of HOLD) if settlement declines instead. Nothing here is ever
+  updated — a correction is always a new offsetting entry, never a
+  mutation of history.
 - **settlement-service** — confirms capture: records its own `settlements`
   row (distinct from the ledger's postings) and publishes `PAYMENT_SETTLED`.
   The orchestrator marks the payment `SETTLED` immediately on that event —
   terminal from the payer/payee's perspective — then separately tells
   ledger-service to post the FINAL leg as a bookkeeping step that follows
   behind rather than gates the terminal state, mirroring how real
-  settlement and ledger close can lag each other slightly.
+  settlement and ledger close can lag each other slightly. Amounts between
+  $9,000–$10,000 get declined instead (`SettlementRiskCheck`) — a
+  realistic payments scenario where the issuer clears authorization but
+  declines at capture — which is the only point in this saga where
+  compensation has anything real to undo.
 - **notification-service** — architecturally the odd one out: it subscribes
-  directly to `payment.events` for `PAYMENT_SETTLED`/`PAYMENT_FAILED`
-  rather than reacting to an orchestrator-issued command, since nothing
-  depends on a notification succeeding. Notifies both payer and payee on
-  success, payer only on failure. Its Kafka config is consumer-only — no
-  producer, because it never publishes anything back.
+  directly to `payment.events` for `PAYMENT_SETTLED`/`PAYMENT_FAILED`/
+  `PAYMENT_COMPENSATED` rather than reacting to an orchestrator-issued
+  command, since nothing depends on a notification succeeding. Notifies
+  both payer and payee on success; payer only on failure or compensation.
+  Its Kafka config is consumer-only — no producer, because it never
+  publishes anything back.
 - **common** — shared event/command contracts (`EventEnvelope`, `PaymentState`,
   event and command records) used by every service.
 
@@ -80,12 +92,44 @@ they currently share one container for local-dev convenience — mirrors
 "database per service" without needing a separate Postgres instance per
 service.
 
+## Compensation
+
+Every prior phase's `FAILED` path happened *before* anything was reserved —
+fraud rejects before funds are touched, insufficient funds means nothing
+was ever reserved. There was nothing to compensate, which would have made
+the Saga pattern's actual reason for existing untested. So settlement-service
+was given a real decline scenario (`SettlementRiskCheck`, $9,000–$10,000) —
+the issuer clears authorization but declines at capture, a genuine payments
+scenario — creating the one point in this saga where compensation has
+something real to undo.
+
+The sequence undoes the saga's steps in **reverse order** of how they were
+originally applied:
+
+1. `SETTLEMENT_DECLINED` → orchestrator sets state to `COMPENSATING`,
+   issues `REVERSE_LEDGER`.
+2. ledger-service posts a REVERSAL entry (debit suspense, credit payer —
+   the exact inverse of the original HOLD) → publishes `LEDGER_REVERSED`.
+3. Orchestrator issues `RELEASE_FUNDS` (state stays `COMPENSATING` — this
+   is the second of two compensating actions, not the last step yet).
+4. funds-auth-service credits the payer's account back → publishes
+   `FUNDS_RELEASED`.
+5. Orchestrator sets state to `COMPENSATED` (terminal), publishes
+   `PAYMENT_COMPENSATED` → notification-service notifies the payer.
+
+Verified end-to-end: a $9,500 payment reaches `COMPENSATED` with the
+ledger's HOLD and REVERSAL entries exactly offsetting, the payer's account
+balance restored to its exact starting value, the funds reservation marked
+`RELEASED`, and no `settlements` row ever created.
+
 ## Concepts & patterns demonstrated
 
 **Distributed systems / HLD**
 - **Saga (orchestration, not choreography)** — a central orchestrator owns
   the state machine rather than scattering the payment lifecycle across
   every service's event handlers; see the tradeoff this was chosen over.
+  Includes real **compensating transactions** (see [Compensation](#compensation)
+  above), not just the happy path — the actual reason the pattern exists.
 - **Transactional Outbox** — write + outbox row in one DB transaction,
   published by a separate poller, avoiding the dual-write problem between
   a database and Kafka.
@@ -108,8 +152,9 @@ service.
 - **Mediator** — the saga orchestrator: fraud-service and funds-auth-service
   never call each other directly, only the orchestrator.
 - **Command** — `CheckFraudCommand`, `AuthorizeFundsCommand`, etc. are
-  requests encapsulated as objects; `ReleaseFundsCommand` is the literal
-  *undo* counterpart to `AuthorizeFundsCommand`.
+  requests encapsulated as objects; `ReleaseFundsCommand`/`ReverseLedgerCommand`
+  are the literal *undo* counterparts to `AuthorizeFundsCommand`/`PostLedgerCommand`,
+  actually issued now that compensation is wired up, not just defined ahead of time.
 - **Factory Method** — static factories on result types (`Verdict.approve()` /
   `.reject()`), and Spring's `ConsumerFactory`/`ProducerFactory` beans.
 - **Repository** — every `JpaRepository` interface.
@@ -127,21 +172,21 @@ deliberately not used here; nothing in this codebase needed them.
 
 ## Status
 
-**Built — all 7 core services:** `payment-api`, `saga-orchestrator`,
-`fraud-service`, `funds-auth-service`, `ledger-service`,
-`settlement-service`, `notification-service`. The full happy path works
-end to end: a payment flows from intake through fraud approval, funds
+**Built — all 7 core services, including real compensation:**
+`payment-api`, `saga-orchestrator`, `fraud-service`, `funds-auth-service`,
+`ledger-service`, `settlement-service`, `notification-service`. The full
+happy path works end to end — intake through fraud approval, funds
 authorization, ledger HOLD posting, settlement capture, a final
 double-entry ledger posting, and notifications to both parties, all the
-way to the terminal `SETTLED` state — verified against real Kafka and
-Postgres, not just compiled. Both failure branches (fraud threshold,
-insufficient funds) verified too, including the payer-only notification
-on failure.
+way to `SETTLED`. Both early-failure branches (fraud threshold,
+insufficient funds) work too. And the saga's actual reason for existing —
+**compensating transactions** — is wired up and verified: a settlement
+decline after funds were already authorized correctly reverses the ledger
+HOLD, releases the reservation, and restores the payer's balance to its
+exact starting value, ending in `COMPENSATED`. All verified against real
+Kafka and Postgres, not just compiled.
 
-**Not built yet:** compensation/rollback wiring for mid-saga failures
-(funds-auth-service already implements the `RELEASE_FUNDS` handler ahead
-of this — every core service exists now, so this is next), and a
-React + AG Grid dashboard.
+**Not built yet:** a React + AG Grid dashboard.
 
 **Also on the roadmap** — the difference between a demo and something that
 reads as production-grade:
@@ -161,18 +206,20 @@ end — every phase since `fraud-service` has shipped with its own tests.
 
 - **Unit tests** (JUnit 5 + Mockito) for pure logic and mockable
   collaborators: fraud-service's `FraudRule` strategies and rule engine,
-  funds-auth-service's `MockBankLedger` (reserve/release/insufficient-funds),
-  ledger-service's `DoubleEntryLedger` (both HOLD and FINAL legs),
-  settlement-service's `SettleCommandListener`, notification-service's
-  `PaymentOutcomeListener` (both-parties-on-success, payer-only-on-failure),
-  and — the most important one — saga-orchestrator's `PaymentEventListener`,
-  covering every state transition (`INITIATED → FRAUD_CHECKED → AUTHORIZED
-  → LEDGER_POSTED → SETTLED`), both `FAILED` branches (each asserting the
-  `PAYMENT_FAILED` event it publishes), idempotent redelivery, and
-  unknown-payment handling. That last suite is the **regression pack** for
-  the saga: every scenario in it mirrors something that was previously
-  verified by hand with curl + psql, now automated so a future change
-  can't silently break it without CI catching it.
+  funds-auth-service's `MockBankLedger` and command listener (both
+  authorize and release paths), ledger-service's `DoubleEntryLedger` (HOLD,
+  FINAL, and REVERSAL legs), settlement-service's `SettleCommandListener`
+  and `SettlementRiskCheck`, notification-service's `PaymentOutcomeListener`
+  (both-parties-on-success, payer-only-on-failure-or-compensation), and —
+  the most important one — saga-orchestrator's `PaymentEventListener`,
+  covering every state transition including the full compensation sequence
+  (`SETTLEMENT_DECLINED → COMPENSATING → LEDGER_REVERSED → COMPENSATING →
+  FUNDS_RELEASED → COMPENSATED`, chained through one test to prove it lands
+  on `COMPENSATED` rather than getting stuck), both early-failure branches,
+  idempotent redelivery, and unknown-payment handling. That last suite is
+  the **regression pack** for the saga: every scenario in it mirrors
+  something that was previously verified by hand with curl + psql, now
+  automated so a future change can't silently break it without CI catching it.
 - **Integration test** (Testcontainers — real Postgres + real Kafka, not
   mocks) for payment-api: posts a real payment over HTTP, confirms it's
   persisted, confirms the outbox actually published to a live Kafka topic,
@@ -221,6 +268,24 @@ curl -i -X POST http://localhost:8080/payments \
 A normal amount like the above reaches `SETTLED` within a couple of
 seconds. Amounts over $10,000 (`amountCents > 1000000`) get rejected by the
 fraud rule instead — try it to see the saga end in `FAILED`.
+
+To see actual **compensation**, send an amount between $9,000–$10,000
+(clears fraud and funds authorization, then gets declined at settlement):
+
+```bash
+curl -i -X POST http://localhost:8080/payments \
+  -H "Content-Type: application/json" \
+  -H "Idempotency-Key: demo-compensation-1" \
+  -d '{"payerAccount":"33333333-3333-3333-3333-333333333333","payeeAccount":"44444444-4444-4444-4444-444444444444","amountCents":950000,"currency":"USD"}'
+```
+
+That reaches `COMPENSATED` — check the ledger to see the HOLD and REVERSAL
+entries exactly offsetting (below), and the account balance restored:
+
+```bash
+docker exec payflow-postgres psql -U payflow -d fundsauth \
+  -c "SELECT account_id, balance_cents FROM accounts WHERE account_id = '33333333-3333-3333-3333-333333333333';"
+```
 
 ```bash
 curl http://localhost:8080/payments/<id>
