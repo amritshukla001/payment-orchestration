@@ -5,10 +5,12 @@ import com.payflow.common.commands.SettleCommand;
 import com.payflow.common.events.EventEnvelope;
 import com.payflow.common.events.PaymentEventType;
 import com.payflow.common.events.PaymentSettledEvent;
+import com.payflow.common.events.SettlementDeclinedEvent;
 import com.payflow.settlementservice.domain.ProcessedEvent;
 import com.payflow.settlementservice.domain.Settlement;
 import com.payflow.settlementservice.repository.ProcessedEventRepository;
 import com.payflow.settlementservice.repository.SettlementRepository;
+import com.payflow.settlementservice.risk.SettlementRiskCheck;
 import org.apache.kafka.clients.consumer.ConsumerRecord;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -19,6 +21,7 @@ import org.springframework.stereotype.Component;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.time.Instant;
+import java.util.Optional;
 import java.util.UUID;
 
 @Component
@@ -29,15 +32,18 @@ public class SettleCommandListener {
 
     private final SettlementRepository settlementRepository;
     private final ProcessedEventRepository processedEventRepository;
+    private final SettlementRiskCheck riskCheck;
     private final KafkaTemplate<String, String> kafkaTemplate;
     private final ObjectMapper objectMapper;
 
     public SettleCommandListener(SettlementRepository settlementRepository,
                                   ProcessedEventRepository processedEventRepository,
+                                  SettlementRiskCheck riskCheck,
                                   KafkaTemplate<String, String> kafkaTemplate,
                                   ObjectMapper objectMapper) {
         this.settlementRepository = settlementRepository;
         this.processedEventRepository = processedEventRepository;
+        this.riskCheck = riskCheck;
         this.kafkaTemplate = kafkaTemplate;
         this.objectMapper = objectMapper;
     }
@@ -59,10 +65,18 @@ public class SettleCommandListener {
             }
 
             SettleCommand command = objectMapper.treeToValue(envelope.payload(), SettleCommand.class);
-            recordCapture(command);
-            publish(command.paymentId(), new PaymentSettledEvent(
-                    command.paymentId(), command.payerAccount(), command.payeeAccount(), Instant.now()));
-            log.info("Payment {} SETTLED (captured)", command.paymentId());
+            Optional<String> decline = riskCheck.checkForDecline(command.amountCents());
+
+            if (decline.isPresent()) {
+                publish(command.paymentId(), PaymentEventType.SETTLEMENT_DECLINED,
+                        new SettlementDeclinedEvent(command.paymentId(), decline.get(), Instant.now()));
+                log.info("Payment {} SETTLEMENT_DECLINED: {}", command.paymentId(), decline.get());
+            } else {
+                recordCapture(command);
+                publish(command.paymentId(), PaymentEventType.PAYMENT_SETTLED, new PaymentSettledEvent(
+                        command.paymentId(), command.payerAccount(), command.payeeAccount(), Instant.now()));
+                log.info("Payment {} SETTLED (captured)", command.paymentId());
+            }
 
             processedEventRepository.save(new ProcessedEvent(envelope.eventId(), Instant.now()));
             ack.acknowledge();
@@ -78,11 +92,11 @@ public class SettleCommandListener {
         settlementRepository.save(new Settlement(command.paymentId(), command.amountCents(), Instant.now()));
     }
 
-    private void publish(UUID paymentId, Object payload) throws Exception {
+    private void publish(UUID paymentId, PaymentEventType type, Object payload) throws Exception {
         EventEnvelope envelope = new EventEnvelope(
                 UUID.randomUUID(),
                 paymentId,
-                PaymentEventType.PAYMENT_SETTLED.name(),
+                type.name(),
                 Instant.now(),
                 objectMapper.valueToTree(payload)
         );

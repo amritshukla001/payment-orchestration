@@ -2,6 +2,7 @@ package com.payflow.notificationservice.consumer;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.payflow.common.events.EventEnvelope;
+import com.payflow.common.events.PaymentCompensatedEvent;
 import com.payflow.common.events.PaymentFailedEvent;
 import com.payflow.common.events.PaymentSettledEvent;
 import com.payflow.notificationservice.domain.NotificationRecord;
@@ -61,6 +62,7 @@ public class PaymentOutcomeListener {
             switch (envelope.eventType()) {
                 case "PAYMENT_SETTLED" -> onPaymentSettled(envelope);
                 case "PAYMENT_FAILED" -> onPaymentFailed(envelope);
+                case "PAYMENT_COMPENSATED" -> onPaymentCompensated(envelope);
                 default -> { /* not a terminal outcome we notify on */ }
             }
 
@@ -85,6 +87,13 @@ public class PaymentOutcomeListener {
         notify(event.paymentId(), event.payerAccount(), Recipient.PAYER, Outcome.FAILURE,
                 "Your payment " + event.paymentId() + " failed: " + event.reason());
         log.info("Payment {} notification sent to payer only (FAILED: {})", event.paymentId(), event.reason());
+    }
+
+    private void onPaymentCompensated(EventEnvelope envelope) throws Exception {
+        PaymentCompensatedEvent event = objectMapper.treeToValue(envelope.payload(), PaymentCompensatedEvent.class);
+        notify(event.paymentId(), event.payerAccount(), Recipient.PAYER, Outcome.REVERSED,
+                "Your payment " + event.paymentId() + " could not be completed and has been reversed; your funds have been returned.");
+        log.info("Payment {} notification sent to payer only (COMPENSATED)", event.paymentId());
     }
 
     private void notify(UUID paymentId, UUID accountId, Recipient recipient, Outcome outcome, String message) {

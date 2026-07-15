@@ -3,6 +3,7 @@ package com.payflow.notificationservice.consumer;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.datatype.jsr310.JavaTimeModule;
 import com.payflow.common.events.EventEnvelope;
+import com.payflow.common.events.PaymentCompensatedEvent;
 import com.payflow.common.events.PaymentFailedEvent;
 import com.payflow.common.events.PaymentSettledEvent;
 import com.payflow.notificationservice.domain.NotificationRecord;
@@ -85,6 +86,24 @@ class PaymentOutcomeListenerTest {
         assertThat(saved.getOutcome()).isEqualTo(Outcome.FAILURE);
         assertThat(saved.getAccountId()).isEqualTo(payerAccount);
         assertThat(saved.getMessage()).contains("over threshold");
+    }
+
+    @Test
+    void paymentCompensatedNotifiesOnlyThePayer() throws Exception {
+        UUID paymentId = UUID.randomUUID();
+        UUID payerAccount = UUID.randomUUID();
+        PaymentCompensatedEvent event = new PaymentCompensatedEvent(paymentId, payerAccount, Instant.now());
+
+        listener.onEvent(recordFor(paymentId, "PAYMENT_COMPENSATED", event), ack);
+
+        ArgumentCaptor<NotificationRecord> captor = ArgumentCaptor.forClass(NotificationRecord.class);
+        verify(notificationRecordRepository, times(1)).save(captor.capture());
+        NotificationRecord saved = captor.getValue();
+
+        assertThat(saved.getRecipient()).isEqualTo(Recipient.PAYER);
+        assertThat(saved.getOutcome()).isEqualTo(Outcome.REVERSED);
+        assertThat(saved.getAccountId()).isEqualTo(payerAccount);
+        assertThat(saved.getMessage()).contains("reversed");
     }
 
     @Test

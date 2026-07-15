@@ -6,9 +6,11 @@ import com.fasterxml.jackson.datatype.jsr310.JavaTimeModule;
 import com.payflow.common.commands.SettleCommand;
 import com.payflow.common.events.EventEnvelope;
 import com.payflow.common.events.PaymentSettledEvent;
+import com.payflow.common.events.SettlementDeclinedEvent;
 import com.payflow.settlementservice.domain.Settlement;
 import com.payflow.settlementservice.repository.ProcessedEventRepository;
 import com.payflow.settlementservice.repository.SettlementRepository;
+import com.payflow.settlementservice.risk.SettlementRiskCheck;
 import org.apache.kafka.clients.consumer.ConsumerRecord;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -20,6 +22,7 @@ import org.springframework.kafka.core.KafkaTemplate;
 import org.springframework.kafka.support.Acknowledgment;
 
 import java.time.Instant;
+import java.util.Optional;
 import java.util.UUID;
 import java.util.concurrent.CompletableFuture;
 
@@ -35,6 +38,8 @@ class SettleCommandListenerTest {
     @Mock
     private ProcessedEventRepository processedEventRepository;
     @Mock
+    private SettlementRiskCheck riskCheck;
+    @Mock
     private KafkaTemplate<String, String> kafkaTemplate;
     @Mock
     private Acknowledgment ack;
@@ -45,9 +50,10 @@ class SettleCommandListenerTest {
     @BeforeEach
     void setUp() {
         objectMapper = new ObjectMapper().registerModule(new JavaTimeModule());
-        listener = new SettleCommandListener(settlementRepository, processedEventRepository, kafkaTemplate, objectMapper);
+        listener = new SettleCommandListener(settlementRepository, processedEventRepository, riskCheck, kafkaTemplate, objectMapper);
         lenient().when(kafkaTemplate.send(anyString(), anyString(), anyString()))
                 .thenReturn(CompletableFuture.completedFuture(null));
+        lenient().when(riskCheck.checkForDecline(anyLong())).thenReturn(Optional.empty());
     }
 
     @Test
@@ -91,6 +97,27 @@ class SettleCommandListenerTest {
         // Still publishes PAYMENT_SETTLED -- the outcome is the same regardless of whether
         // this is the first or a redelivered attempt.
         verify(kafkaTemplate).send(eq("payment.events"), eq(paymentId.toString()), anyString());
+    }
+
+    @Test
+    void publishesSettlementDeclinedInsteadOfCapturingWhenRiskCheckObjects() throws Exception {
+        UUID paymentId = UUID.randomUUID();
+        SettleCommand command = new SettleCommand(
+                paymentId, UUID.randomUUID(), UUID.randomUUID(), 950_000L, "USD", Instant.now());
+        when(riskCheck.checkForDecline(950_000L)).thenReturn(Optional.of("Issuer declined capture"));
+
+        listener.onCommand(recordFor(paymentId, command), ack);
+
+        verify(settlementRepository, never()).save(any());
+
+        ArgumentCaptor<String> jsonCaptor = ArgumentCaptor.forClass(String.class);
+        verify(kafkaTemplate).send(eq("payment.events"), eq(paymentId.toString()), jsonCaptor.capture());
+        EventEnvelope published = objectMapper.readValue(jsonCaptor.getValue(), EventEnvelope.class);
+        assertThat(published.eventType()).isEqualTo("SETTLEMENT_DECLINED");
+        SettlementDeclinedEvent event = objectMapper.treeToValue(published.payload(), SettlementDeclinedEvent.class);
+        assertThat(event.reason()).isEqualTo("Issuer declined capture");
+
+        verify(ack).acknowledge();
     }
 
     @Test

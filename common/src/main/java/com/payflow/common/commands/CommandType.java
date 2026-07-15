@@ -11,5 +11,6 @@ public enum CommandType {
     POST_LEDGER,
     SETTLE,
     POST_FINAL_LEDGER,
-    RELEASE_FUNDS
+    RELEASE_FUNDS,
+    REVERSE_LEDGER
 }

@@ -5,14 +5,18 @@ import com.payflow.common.commands.AuthorizeFundsCommand;
 import com.payflow.common.commands.CheckFraudCommand;
 import com.payflow.common.commands.PostFinalLedgerCommand;
 import com.payflow.common.commands.PostLedgerCommand;
+import com.payflow.common.commands.ReleaseFundsCommand;
+import com.payflow.common.commands.ReverseLedgerCommand;
 import com.payflow.common.commands.SettleCommand;
 import com.payflow.common.enums.PaymentState;
 import com.payflow.common.events.EventEnvelope;
 import com.payflow.common.events.FraudRejectedEvent;
 import com.payflow.common.events.FundsAuthorizationFailedEvent;
+import com.payflow.common.events.PaymentCompensatedEvent;
 import com.payflow.common.events.PaymentEventType;
 import com.payflow.common.events.PaymentFailedEvent;
 import com.payflow.common.events.PaymentInitiatedEvent;
+import com.payflow.common.events.SettlementDeclinedEvent;
 import com.payflow.orchestrator.domain.PaymentSagaState;
 import com.payflow.orchestrator.domain.ProcessedEvent;
 import com.payflow.orchestrator.repository.PaymentSagaStateRepository;
@@ -90,6 +94,9 @@ public class PaymentEventListener {
             case LEDGER_POSTED -> onLedgerPosted(envelope);
             case PAYMENT_SETTLED -> onPaymentSettled(envelope);
             case LEDGER_FINALIZED -> onLedgerFinalized(envelope);
+            case SETTLEMENT_DECLINED -> onSettlementDeclined(envelope);
+            case LEDGER_REVERSED -> onLedgerReversed(envelope);
+            case FUNDS_RELEASED -> onFundsReleased(envelope);
             default -> log.info("No saga handling wired up yet for {}", type);
         }
     }
@@ -198,6 +205,65 @@ public class PaymentEventListener {
         FundsAuthorizationFailedEvent event =
                 objectMapper.treeToValue(envelope.payload(), FundsAuthorizationFailedEvent.class);
         failSaga(event.paymentId(), event.reason(), "funds authorization rejected");
+    }
+
+    // --- compensation path -----------------------------------------------
+    // Settlement is the only step so far that can decline after funds were
+    // already authorized and a ledger HOLD already posted -- everything
+    // upstream of it fails before touching money. Compensating actions run
+    // in reverse order of how they were originally applied: reverse the
+    // ledger first (the most recent side effect), then release the funds
+    // reservation (the earlier one).
+
+    private void onSettlementDeclined(EventEnvelope envelope) throws Exception {
+        SettlementDeclinedEvent event = objectMapper.treeToValue(envelope.payload(), SettlementDeclinedEvent.class);
+        PaymentSagaState state = sagaStateRepository.findById(event.paymentId()).orElse(null);
+        if (state == null) {
+            log.warn("Received SETTLEMENT_DECLINED for unknown payment {}", event.paymentId());
+            return;
+        }
+
+        state.advanceTo(PaymentState.COMPENSATING, Instant.now());
+        sagaStateRepository.save(state);
+        log.info("Payment {} COMPENSATING — settlement declined: {}", event.paymentId(), event.reason());
+
+        ReverseLedgerCommand command = new ReverseLedgerCommand(
+                event.paymentId(), state.getPayerAccount(), state.getAmountCents(), Instant.now());
+        publishCommand(event.paymentId(), "REVERSE_LEDGER", command);
+        log.info("Payment {} COMPENSATING -> issued REVERSE_LEDGER", event.paymentId());
+    }
+
+    private void onLedgerReversed(EventEnvelope envelope) throws Exception {
+        UUID paymentId = envelope.aggregateId();
+        PaymentSagaState state = sagaStateRepository.findById(paymentId).orElse(null);
+        if (state == null) {
+            log.warn("Received LEDGER_REVERSED for unknown payment {}", paymentId);
+            return;
+        }
+
+        // State stays COMPENSATING -- reversing the ledger is the first of
+        // two compensating actions; it only reaches COMPENSATED once the
+        // funds reservation is released too.
+        ReleaseFundsCommand command = new ReleaseFundsCommand(
+                paymentId, state.getPayerAccount(), state.getAmountCents(), Instant.now());
+        publishCommand(paymentId, "RELEASE_FUNDS", command);
+        log.info("Payment {} ledger reversed -> issued RELEASE_FUNDS", paymentId);
+    }
+
+    private void onFundsReleased(EventEnvelope envelope) throws Exception {
+        UUID paymentId = envelope.aggregateId();
+        PaymentSagaState state = sagaStateRepository.findById(paymentId).orElse(null);
+        if (state == null) {
+            log.warn("Received FUNDS_RELEASED for unknown payment {}", paymentId);
+            return;
+        }
+
+        state.advanceTo(PaymentState.COMPENSATED, Instant.now());
+        sagaStateRepository.save(state);
+        log.info("Payment {} COMPENSATED — compensation complete, funds returned to payer", paymentId);
+
+        publishEvent(paymentId, PaymentEventType.PAYMENT_COMPENSATED,
+                new PaymentCompensatedEvent(paymentId, state.getPayerAccount(), Instant.now()));
     }
 
     private void failSaga(UUID paymentId, String reason, String logLabel) throws Exception {

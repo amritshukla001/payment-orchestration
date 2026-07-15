@@ -7,6 +7,8 @@ import com.payflow.common.commands.AuthorizeFundsCommand;
 import com.payflow.common.commands.CheckFraudCommand;
 import com.payflow.common.commands.PostFinalLedgerCommand;
 import com.payflow.common.commands.PostLedgerCommand;
+import com.payflow.common.commands.ReleaseFundsCommand;
+import com.payflow.common.commands.ReverseLedgerCommand;
 import com.payflow.common.commands.SettleCommand;
 import com.payflow.common.enums.PaymentState;
 import com.payflow.common.events.*;
@@ -186,6 +188,74 @@ class PaymentEventListenerTest {
         verifyNoInteractions(sagaStateRepository);
         verifyNoInteractions(kafkaTemplate);
         verify(ack).acknowledge();
+    }
+
+    @Test
+    void settlementDeclinedAdvancesToCompensatingAndIssuesReverseLedger() throws Exception {
+        UUID paymentId = UUID.randomUUID();
+        PaymentSagaState existing = existingState(paymentId, PaymentState.LEDGER_POSTED);
+        when(sagaStateRepository.findById(paymentId)).thenReturn(Optional.of(existing));
+
+        listener.onEvent(recordFor(paymentId, PaymentEventType.SETTLEMENT_DECLINED,
+                new SettlementDeclinedEvent(paymentId, "issuer declined capture", Instant.now())), ack);
+
+        assertThat(existing.getState()).isEqualTo(PaymentState.COMPENSATING);
+        ReverseLedgerCommand command = capturedCommand(paymentId, "REVERSE_LEDGER", ReverseLedgerCommand.class);
+        assertThat(command.payerAccount()).isEqualTo(existing.getPayerAccount());
+        assertThat(command.amountCents()).isEqualTo(existing.getAmountCents());
+    }
+
+    @Test
+    void ledgerReversedStaysCompensatingAndIssuesReleaseFunds() throws Exception {
+        UUID paymentId = UUID.randomUUID();
+        PaymentSagaState existing = existingState(paymentId, PaymentState.COMPENSATING);
+        when(sagaStateRepository.findById(paymentId)).thenReturn(Optional.of(existing));
+
+        listener.onEvent(recordFor(paymentId, PaymentEventType.LEDGER_REVERSED,
+                new LedgerReversedEvent(paymentId, Instant.now())), ack);
+
+        // Compensation isn't complete yet -- releasing funds is the second
+        // half, so the state must not jump to COMPENSATED prematurely.
+        assertThat(existing.getState()).isEqualTo(PaymentState.COMPENSATING);
+        ReleaseFundsCommand command = capturedCommand(paymentId, "RELEASE_FUNDS", ReleaseFundsCommand.class);
+        assertThat(command.payerAccount()).isEqualTo(existing.getPayerAccount());
+    }
+
+    @Test
+    void fundsReleasedAdvancesToCompensatedAndPublishesPaymentCompensated() throws Exception {
+        UUID paymentId = UUID.randomUUID();
+        PaymentSagaState existing = existingState(paymentId, PaymentState.COMPENSATING);
+        when(sagaStateRepository.findById(paymentId)).thenReturn(Optional.of(existing));
+
+        listener.onEvent(recordFor(paymentId, PaymentEventType.FUNDS_RELEASED,
+                new FundsReleasedEvent(paymentId, Instant.now())), ack);
+
+        assertThat(existing.getState()).isEqualTo(PaymentState.COMPENSATED);
+        PaymentCompensatedEvent event = capturedEvent(paymentId, "PAYMENT_COMPENSATED", PaymentCompensatedEvent.class);
+        assertThat(event.payerAccount()).isEqualTo(existing.getPayerAccount());
+    }
+
+    @Test
+    void fullCompensationSequenceEndsInCompensatedNotFailed() throws Exception {
+        // The end-to-end shape of the compensation path, chained through
+        // one saga state object exactly as the real Kafka round trips would --
+        // proves the whole sequence lands on COMPENSATED, not stuck or
+        // silently falling back to FAILED.
+        UUID paymentId = UUID.randomUUID();
+        PaymentSagaState existing = existingState(paymentId, PaymentState.LEDGER_POSTED);
+        when(sagaStateRepository.findById(paymentId)).thenReturn(Optional.of(existing));
+
+        listener.onEvent(recordFor(paymentId, PaymentEventType.SETTLEMENT_DECLINED,
+                new SettlementDeclinedEvent(paymentId, "issuer declined capture", Instant.now())), ack);
+        assertThat(existing.getState()).isEqualTo(PaymentState.COMPENSATING);
+
+        listener.onEvent(recordFor(paymentId, PaymentEventType.LEDGER_REVERSED,
+                new LedgerReversedEvent(paymentId, Instant.now())), ack);
+        assertThat(existing.getState()).isEqualTo(PaymentState.COMPENSATING);
+
+        listener.onEvent(recordFor(paymentId, PaymentEventType.FUNDS_RELEASED,
+                new FundsReleasedEvent(paymentId, Instant.now())), ack);
+        assertThat(existing.getState()).isEqualTo(PaymentState.COMPENSATED);
     }
 
     @Test

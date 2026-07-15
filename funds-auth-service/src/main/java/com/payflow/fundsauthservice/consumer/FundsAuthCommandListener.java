@@ -6,6 +6,7 @@ import com.payflow.common.commands.ReleaseFundsCommand;
 import com.payflow.common.events.EventEnvelope;
 import com.payflow.common.events.FundsAuthorizationFailedEvent;
 import com.payflow.common.events.FundsAuthorizedEvent;
+import com.payflow.common.events.FundsReleasedEvent;
 import com.payflow.common.events.PaymentEventType;
 import com.payflow.fundsauthservice.bank.MockBankLedger;
 import com.payflow.fundsauthservice.domain.ProcessedEvent;
@@ -90,6 +91,8 @@ public class FundsAuthCommandListener {
 
         ReleaseFundsCommand command = objectMapper.treeToValue(envelope.payload(), ReleaseFundsCommand.class);
         bankLedger.release(command.paymentId());
+        publish(command.paymentId(), PaymentEventType.FUNDS_RELEASED,
+                new FundsReleasedEvent(command.paymentId(), Instant.now()));
         log.info("Payment {} funds RELEASED (compensation)", command.paymentId());
 
         processedEventRepository.save(new ProcessedEvent(envelope.eventId(), Instant.now()));

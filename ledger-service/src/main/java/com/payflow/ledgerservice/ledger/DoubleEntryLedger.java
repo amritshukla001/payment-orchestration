@@ -45,4 +45,13 @@ public class DoubleEntryLedger {
                 UUID.randomUUID(), paymentId, SUSPENSE_ACCOUNT, payeeAccount,
                 amountCents, PostingType.FINAL, Instant.now()));
     }
+
+    public void reverseHold(UUID paymentId, UUID payerAccount, long amountCents) {
+        if (ledgerEntryRepository.existsByPaymentIdAndPostingType(paymentId, PostingType.REVERSAL)) {
+            return; // already posted — safe no-op on redelivery
+        }
+        ledgerEntryRepository.save(new LedgerEntry(
+                UUID.randomUUID(), paymentId, SUSPENSE_ACCOUNT, payerAccount,
+                amountCents, PostingType.REVERSAL, Instant.now()));
+    }
 }

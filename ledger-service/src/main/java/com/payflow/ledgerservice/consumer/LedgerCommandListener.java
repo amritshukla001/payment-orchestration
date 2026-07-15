@@ -3,9 +3,11 @@ package com.payflow.ledgerservice.consumer;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.payflow.common.commands.PostFinalLedgerCommand;
 import com.payflow.common.commands.PostLedgerCommand;
+import com.payflow.common.commands.ReverseLedgerCommand;
 import com.payflow.common.events.EventEnvelope;
 import com.payflow.common.events.LedgerFinalizedEvent;
 import com.payflow.common.events.LedgerPostedEvent;
+import com.payflow.common.events.LedgerReversedEvent;
 import com.payflow.common.events.PaymentEventType;
 import com.payflow.ledgerservice.domain.ProcessedEvent;
 import com.payflow.ledgerservice.ledger.DoubleEntryLedger;
@@ -58,6 +60,7 @@ public class LedgerCommandListener {
             switch (envelope.eventType()) {
                 case "POST_LEDGER" -> handlePostLedger(envelope);
                 case "POST_FINAL_LEDGER" -> handlePostFinalLedger(envelope);
+                case "REVERSE_LEDGER" -> handleReverseLedger(envelope);
                 default -> { /* not for us */ }
             }
 
@@ -80,6 +83,13 @@ public class LedgerCommandListener {
         ledger.postFinal(command.paymentId(), command.payeeAccount(), command.amountCents());
         publish(command.paymentId(), PaymentEventType.LEDGER_FINALIZED, new LedgerFinalizedEvent(command.paymentId(), Instant.now()));
         log.info("Payment {} ledger FINAL posted", command.paymentId());
+    }
+
+    private void handleReverseLedger(EventEnvelope envelope) throws Exception {
+        ReverseLedgerCommand command = objectMapper.treeToValue(envelope.payload(), ReverseLedgerCommand.class);
+        ledger.reverseHold(command.paymentId(), command.payerAccount(), command.amountCents());
+        publish(command.paymentId(), PaymentEventType.LEDGER_REVERSED, new LedgerReversedEvent(command.paymentId(), Instant.now()));
+        log.info("Payment {} ledger HOLD reversed (compensation)", command.paymentId());
     }
 
     private void publish(UUID paymentId, PaymentEventType type, Object payload) throws Exception {

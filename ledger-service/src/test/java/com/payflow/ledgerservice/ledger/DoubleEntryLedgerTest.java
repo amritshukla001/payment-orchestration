@@ -79,4 +79,31 @@ class DoubleEntryLedgerTest {
 
         verify(ledgerEntryRepository, never()).save(org.mockito.ArgumentMatchers.any());
     }
+
+    @Test
+    void reverseHoldPostsAnOffsettingEntryDebitingSuspenseAndCreditingThePayer() {
+        UUID paymentId = UUID.randomUUID();
+        UUID payerAccount = UUID.randomUUID();
+        when(ledgerEntryRepository.existsByPaymentIdAndPostingType(paymentId, PostingType.REVERSAL)).thenReturn(false);
+
+        ledger().reverseHold(paymentId, payerAccount, 950_000L);
+
+        ArgumentCaptor<LedgerEntry> captor = ArgumentCaptor.forClass(LedgerEntry.class);
+        verify(ledgerEntryRepository).save(captor.capture());
+        LedgerEntry saved = captor.getValue();
+        assertThat(saved.getDebitAccount()).isEqualTo(DoubleEntryLedger.SUSPENSE_ACCOUNT);
+        assertThat(saved.getCreditAccount()).isEqualTo(payerAccount);
+        assertThat(saved.getAmountCents()).isEqualTo(950_000L);
+        assertThat(saved.getPostingType()).isEqualTo(PostingType.REVERSAL);
+    }
+
+    @Test
+    void reverseHoldIsIdempotentAgainstARedeliveredCommand() {
+        UUID paymentId = UUID.randomUUID();
+        when(ledgerEntryRepository.existsByPaymentIdAndPostingType(paymentId, PostingType.REVERSAL)).thenReturn(true);
+
+        ledger().reverseHold(paymentId, UUID.randomUUID(), 950_000L);
+
+        verify(ledgerEntryRepository, never()).save(org.mockito.ArgumentMatchers.any());
+    }
 }
