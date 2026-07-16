@@ -170,9 +170,32 @@ Not every pattern fits everywhere, and forcing one in where it doesn't
 belong would defeat the point — Decorator and Template Method are
 deliberately not used here; nothing in this codebase needed them.
 
+## Dashboard
+
+`dashboard/` is a small React + AG Grid ops console — a live grid of every
+payment and its current saga state, with a per-payment detail drawer showing
+ledger postings and notifications. It's deliberately *not* a new backend
+service: it's a thin client polling three read-only REST APIs added to
+existing services —
+
+- `GET /api/sagas` (saga-orchestrator, port 8082) — the grid itself.
+  This is the only service whose view of a payment reflects its *current*
+  state; `payment-api`'s own `payments` row is stamped `INITIATED` at
+  creation and never updated again, since it has no Kafka consumer of its
+  own.
+- `GET /api/ledger/{paymentId}` (ledger-service, port 8085) — the double-entry
+  postings shown in the drawer.
+- `GET /api/notifications/{paymentId}` (notification-service, port 8087) —
+  the notifications shown in the drawer.
+
+There's no API gateway in front of these yet (still on the roadmap below),
+so the frontend calls each service's port directly; each controller has
+`@CrossOrigin` opened for the Vite dev server's origin. See
+`dashboard/README.md` for how to run it.
+
 ## Status
 
-**Built — all 7 core services, including real compensation:**
+**Built — all 7 core services, including real compensation, plus a live dashboard:**
 `payment-api`, `saga-orchestrator`, `fraud-service`, `funds-auth-service`,
 `ledger-service`, `settlement-service`, `notification-service`. The full
 happy path works end to end — intake through fraud approval, funds
@@ -184,9 +207,8 @@ insufficient funds) work too. And the saga's actual reason for existing —
 decline after funds were already authorized correctly reverses the ledger
 HOLD, releases the reservation, and restores the payer's balance to its
 exact starting value, ending in `COMPENSATED`. All verified against real
-Kafka and Postgres, not just compiled.
-
-**Not built yet:** a React + AG Grid dashboard.
+Kafka and Postgres, not just compiled. On top of that, the
+[Dashboard](#dashboard) above gives a live, browsable view over all of it.
 
 **Also on the roadmap** — the difference between a demo and something that
 reads as production-grade:
@@ -252,6 +274,9 @@ cd funds-auth-service && mvn spring-boot:run   # :8084
 cd ledger-service && mvn spring-boot:run       # :8085
 cd settlement-service && mvn spring-boot:run   # :8086
 cd notification-service && mvn spring-boot:run # :8087
+
+# 4. (optional) Start the dashboard
+cd dashboard && npm install && npm run dev     # http://localhost:5173
 ```
 
 Kafka UI is at http://localhost:8081 for browsing topics/messages directly.
@@ -292,7 +317,8 @@ curl http://localhost:8080/payments/<id>
 curl http://localhost:8080/payments/<id>/timeline
 ```
 
-Check saga progress directly:
+Check saga progress directly (or just watch it live in the
+[dashboard](#dashboard) instead):
 
 ```bash
 docker exec payflow-postgres psql -U payflow -d orchestrator \
