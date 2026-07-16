@@ -193,6 +193,23 @@ so the frontend calls each service's port directly; each controller has
 `@CrossOrigin` opened for the Vite dev server's origin. See
 `dashboard/README.md` for how to run it.
 
+## Security
+
+Every REST endpoint across the four services that expose one — `payment-api`,
+`saga-orchestrator`, `ledger-service`, `notification-service` — requires an
+`X-API-Key` header, checked by a shared `ApiKeyAuthFilter` in `common` that
+each service registers explicitly via its own `FilterRegistrationBean`
+(component scanning never crosses from `common` into a service's own base
+package, so this can't just be a `@Component` picked up automatically). The
+key is a single configured value (`payflow.security.api-key`, overridable via
+the `PAYFLOW_API_KEY` env var, defaulting to `local-dev-api-key-change-me`
+for local dev) — deliberately simple, since the point is demonstrating the
+auth boundary itself, not building a credential-management system.
+`/actuator/**` is explicitly exempted so health checks keep working
+unauthenticated. `fraud-service`, `funds-auth-service`, and
+`settlement-service` have no custom REST endpoints (Kafka-only), so there's
+nothing to gate on them beyond actuator.
+
 ## Status
 
 **Built — all 7 core services, including real compensation, plus a live dashboard:**
@@ -208,11 +225,11 @@ decline after funds were already authorized correctly reverses the ledger
 HOLD, releases the reservation, and restores the payer's balance to its
 exact starting value, ending in `COMPENSATED`. All verified against real
 Kafka and Postgres, not just compiled. On top of that, the
-[Dashboard](#dashboard) above gives a live, browsable view over all of it.
+[Dashboard](#dashboard) above gives a live, browsable view over all of it,
+and every REST endpoint is now gated behind [API-key auth](#security).
 
 **Also on the roadmap** — the difference between a demo and something that
 reads as production-grade:
-- **Security** — API-key auth (every endpoint is wide open right now)
 - **Observability** — metrics (Micrometer/Prometheus) + distributed tracing across the 4-service saga
 - **Resilience** — circuit breaker + retry policy (Resilience4j); Kafka redelivery gives retries "for free" today but there's no deliberate backoff policy
 - **API documentation** — OpenAPI/Swagger on payment-api
@@ -245,8 +262,12 @@ end — every phase since `fraud-service` has shipped with its own tests.
 - **Integration test** (Testcontainers — real Postgres + real Kafka, not
   mocks) for payment-api: posts a real payment over HTTP, confirms it's
   persisted, confirms the outbox actually published to a live Kafka topic,
-  and confirms the `Idempotency-Key` retry path returns the same payment
-  instead of creating a duplicate.
+  confirms the `Idempotency-Key` retry path returns the same payment instead
+  of creating a duplicate, and confirms a request with no `X-API-Key` is
+  rejected with `401`.
+- `common`'s `ApiKeyAuthFilter` has its own unit test covering the correct
+  key, a missing key, a wrong key, and an exempt path (`/actuator/**`) — the
+  one piece of logic shared identically across all four gated services.
 
 Run everything: `mvn test` from the repo root (requires Docker for the
 Testcontainers-based payment-api test — this needs a Docker Engine version
@@ -287,6 +308,7 @@ Kafka UI is at http://localhost:8081 for browsing topics/messages directly.
 curl -i -X POST http://localhost:8080/payments \
   -H "Content-Type: application/json" \
   -H "Idempotency-Key: demo-1" \
+  -H "X-API-Key: local-dev-api-key-change-me" \
   -d '{"payerAccount":"11111111-1111-1111-1111-111111111111","payeeAccount":"22222222-2222-2222-2222-222222222222","amountCents":2500,"currency":"USD"}'
 ```
 
@@ -301,6 +323,7 @@ To see actual **compensation**, send an amount between $9,000–$10,000
 curl -i -X POST http://localhost:8080/payments \
   -H "Content-Type: application/json" \
   -H "Idempotency-Key: demo-compensation-1" \
+  -H "X-API-Key: local-dev-api-key-change-me" \
   -d '{"payerAccount":"33333333-3333-3333-3333-333333333333","payeeAccount":"44444444-4444-4444-4444-444444444444","amountCents":950000,"currency":"USD"}'
 ```
 
@@ -313,8 +336,8 @@ docker exec payflow-postgres psql -U payflow -d fundsauth \
 ```
 
 ```bash
-curl http://localhost:8080/payments/<id>
-curl http://localhost:8080/payments/<id>/timeline
+curl -H "X-API-Key: local-dev-api-key-change-me" http://localhost:8080/payments/<id>
+curl -H "X-API-Key: local-dev-api-key-change-me" http://localhost:8080/payments/<id>/timeline
 ```
 
 Check saga progress directly (or just watch it live in the

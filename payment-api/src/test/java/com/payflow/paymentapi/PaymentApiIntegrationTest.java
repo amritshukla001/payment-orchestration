@@ -43,12 +43,15 @@ class PaymentApiIntegrationTest {
     @Container
     static KafkaContainer kafka = new KafkaContainer(DockerImageName.parse("confluentinc/cp-kafka:7.5.0"));
 
+    private static final String API_KEY = "it-test-api-key";
+
     @DynamicPropertySource
     static void registerProperties(DynamicPropertyRegistry registry) {
         registry.add("spring.datasource.url", postgres::getJdbcUrl);
         registry.add("spring.datasource.username", postgres::getUsername);
         registry.add("spring.datasource.password", postgres::getPassword);
         registry.add("spring.kafka.bootstrap-servers", kafka::getBootstrapServers);
+        registry.add("payflow.security.api-key", () -> API_KEY);
     }
 
     @Autowired
@@ -64,6 +67,7 @@ class PaymentApiIntegrationTest {
         HttpHeaders headers = new HttpHeaders();
         headers.setContentType(MediaType.APPLICATION_JSON);
         headers.set("Idempotency-Key", idempotencyKey);
+        headers.set("X-API-Key", API_KEY);
         HttpEntity<String> request = new HttpEntity<>(body, headers);
 
         ResponseEntity<Map> firstResponse = restTemplate.postForEntity("/payments", request, Map.class);
@@ -79,8 +83,30 @@ class PaymentApiIntegrationTest {
         assertPaymentInitiatedEventPublished(paymentId);
 
         // Confirm it's queryable back through the API too.
-        ResponseEntity<Map> getResponse = restTemplate.getForEntity("/payments/" + paymentId, Map.class);
+        HttpEntity<Void> getRequest = new HttpEntity<>(authHeaders());
+        ResponseEntity<Map> getResponse = restTemplate.exchange(
+                "/payments/" + paymentId, HttpMethod.GET, getRequest, Map.class);
         assertThat(getResponse.getBody().get("state")).isEqualTo("INITIATED");
+    }
+
+    @Test
+    void aRequestWithoutTheApiKeyIsRejected() {
+        HttpHeaders headers = new HttpHeaders();
+        headers.setContentType(MediaType.APPLICATION_JSON);
+        headers.set("Idempotency-Key", "it-" + UUID.randomUUID());
+        String body = """
+                {"payerAccount":"%s","payeeAccount":"%s","amountCents":2500,"currency":"USD"}
+                """.formatted(UUID.randomUUID(), UUID.randomUUID());
+
+        ResponseEntity<Map> response = restTemplate.postForEntity("/payments", new HttpEntity<>(body, headers), Map.class);
+
+        assertThat(response.getStatusCode()).isEqualTo(HttpStatus.UNAUTHORIZED);
+    }
+
+    private HttpHeaders authHeaders() {
+        HttpHeaders headers = new HttpHeaders();
+        headers.set("X-API-Key", API_KEY);
+        return headers;
     }
 
     private void assertPaymentInitiatedEventPublished(String paymentId) {

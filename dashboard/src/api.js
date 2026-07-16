@@ -6,8 +6,14 @@ const ORCHESTRATOR_URL = "http://localhost:8082";
 const LEDGER_URL = "http://localhost:8085";
 const NOTIFICATION_URL = "http://localhost:8087";
 
+// Matches each service's PAYFLOW_API_KEY default (local-dev-api-key-change-me)
+// unless overridden -- see dashboard/README.md. A key shipped in frontend JS
+// is never a real secret; this demonstrates the auth boundary, not credential
+// management.
+const API_KEY = import.meta.env.VITE_API_KEY ?? "local-dev-api-key-change-me";
+
 async function getJson(url) {
-  const res = await fetch(url);
+  const res = await fetch(url, { headers: { "X-API-Key": API_KEY } });
   if (!res.ok) {
     throw new Error(`${url} -> HTTP ${res.status}`);
   }

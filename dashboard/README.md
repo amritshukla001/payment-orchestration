@@ -33,3 +33,18 @@ There's no API gateway in front of the services (an explicitly deferred
 roadmap item), so the dashboard calls each service's port directly and
 relies on the `@CrossOrigin` annotations already added to each read
 controller.
+
+## Auth
+
+Every service now requires an `X-API-Key` header (see the root README's
+Security section). The dashboard sends one on every request, read from
+`VITE_API_KEY` at build/dev time, falling back to the same
+`local-dev-api-key-change-me` default the backend services fall back to:
+
+```bash
+VITE_API_KEY=your-key npm run dev
+```
+
+A key shipped in frontend JS is never a real secret — this demonstrates the
+auth boundary between the dashboard and the services, not a credential
+management system.

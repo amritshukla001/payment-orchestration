@@ -10,7 +10,7 @@
   <packaging>pom</packaging>
 
   <name>Payment Orchestration Service</name>
-  <description>Saga-based, event-driven payment orchestration built as a portfolio project</description>
+  <description>A backend system-design playground built as a portfolio project -- a payments pipeline is the vehicle, not the point</description>
 
   <parent>
     <groupId>org.springframework.boot</groupId>
