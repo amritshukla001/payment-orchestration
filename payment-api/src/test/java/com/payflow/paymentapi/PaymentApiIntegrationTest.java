@@ -91,14 +91,13 @@ class PaymentApiIntegrationTest {
 
     @Test
     void aRequestWithoutTheApiKeyIsRejected() {
-        HttpHeaders headers = new HttpHeaders();
-        headers.setContentType(MediaType.APPLICATION_JSON);
-        headers.set("Idempotency-Key", "it-" + UUID.randomUUID());
-        String body = """
-                {"payerAccount":"%s","payeeAccount":"%s","amountCents":2500,"currency":"USD"}
-                """.formatted(UUID.randomUUID(), UUID.randomUUID());
-
-        ResponseEntity<Map> response = restTemplate.postForEntity("/payments", new HttpEntity<>(body, headers), Map.class);
+        // A GET, not a POST: the JDK's default HttpURLConnection-based client
+        // can't cleanly surface a 401 for a request with a body already
+        // streamed ("cannot retry due to server authentication, in streaming
+        // mode") -- an artifact of the test client, not the filter under
+        // test, which runs identically regardless of HTTP method.
+        ResponseEntity<Map> response = restTemplate.getForEntity(
+                "/payments/" + UUID.randomUUID(), Map.class);
 
         assertThat(response.getStatusCode()).isEqualTo(HttpStatus.UNAUTHORIZED);
     }
