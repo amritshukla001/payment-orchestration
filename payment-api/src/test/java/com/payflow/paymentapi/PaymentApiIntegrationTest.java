@@ -52,13 +52,36 @@ class PaymentApiIntegrationTest {
         registry.add("spring.datasource.password", postgres::getPassword);
         registry.add("spring.kafka.bootstrap-servers", kafka::getBootstrapServers);
         registry.add("payflow.security.api-key", () -> API_KEY);
-        // TEMPORARY diagnostic flag -- to be removed once the CI-only
-        // /actuator/prometheus 404 is root-caused via the conditions report.
-        registry.add("debug", () -> "true");
     }
 
     @Autowired
     private TestRestTemplate restTemplate;
+
+    @Autowired
+    private org.springframework.context.ConfigurableApplicationContext applicationContext;
+
+    // TEMPORARY diagnostic test -- to be removed once the CI-only
+    // /actuator/prometheus 404 is root-caused. Prints the condition
+    // evaluation report programmatically since @DynamicPropertySource's
+    // debug=true doesn't hook Spring Boot's usual conditions logging in a
+    // @SpringBootTest bootstrap.
+    @Test
+    void diagnosePrometheusConditions() {
+        var report = org.springframework.boot.autoconfigure.condition.ConditionEvaluationReport
+                .get(applicationContext.getBeanFactory());
+        report.getConditionAndOutcomesBySource().forEach((source, outcomes) -> {
+            if (source.toLowerCase().contains("prometheus") || source.toLowerCase().contains("metrics")) {
+                System.out.println("DIAG_SOURCE: " + source);
+                outcomes.forEach(o -> System.out.println("  DIAG_OUTCOME match=" + o.getOutcome().isMatch() + " " + o.getOutcome()));
+            }
+        });
+        System.out.println("DIAG_EXCLUSIONS: " + report.getExclusions());
+        System.out.println("DIAG_UNCONDITIONAL: " + report.getUnconditionalClasses());
+        System.out.println("DIAG_PROMETHEUS_BEANS: " + applicationContext.getBeanNamesForType(
+                io.micrometer.prometheusmetrics.PrometheusMeterRegistry.class).length);
+        System.out.println("DIAG_ALL_METER_REGISTRIES: "
+                + java.util.Arrays.toString(applicationContext.getBeanNamesForType(io.micrometer.core.instrument.MeterRegistry.class)));
+    }
 
     @Test
     void postingAPaymentPersistsItPublishesToKafkaAndIsIdempotent() {
