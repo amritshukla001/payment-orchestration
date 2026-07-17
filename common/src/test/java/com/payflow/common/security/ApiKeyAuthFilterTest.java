@@ -80,4 +80,18 @@ class ApiKeyAuthFilterTest {
         verify(chain).doFilter(request, response);
         verify(response, never()).setStatus(anyInt());
     }
+
+    @Test
+    void letsACorsPreflightThroughWithNoKeyAtAll() throws Exception {
+        // A browser's OPTIONS preflight never carries custom headers -- that's
+        // the whole point of asking permission first. Blocking it here would
+        // break CORS for every actual cross-origin request behind it. Method
+        // check short-circuits before the URI is even looked at.
+        when(request.getMethod()).thenReturn("OPTIONS");
+
+        filter.doFilter(request, response, chain);
+
+        verify(chain).doFilter(request, response);
+        verify(response, never()).setStatus(anyInt());
+    }
 }

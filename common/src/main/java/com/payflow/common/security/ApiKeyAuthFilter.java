@@ -32,7 +32,14 @@ public class ApiKeyAuthFilter extends OncePerRequestFilter {
     @Override
     protected void doFilterInternal(HttpServletRequest request, HttpServletResponse response, FilterChain chain)
             throws ServletException, IOException {
-        if (isExempt(request.getRequestURI()) || expectedApiKey.equals(request.getHeader(HEADER_NAME))) {
+        // CORS preflight requests never carry custom headers like X-API-Key --
+        // that's the whole point of a preflight, it's the browser asking
+        // permission to send one. Blocking OPTIONS here doesn't leak anything
+        // (no response body, just the CORS policy), but it does break every
+        // actual cross-origin request behind it if left unexempted.
+        if ("OPTIONS".equalsIgnoreCase(request.getMethod())
+                || isExempt(request.getRequestURI())
+                || expectedApiKey.equals(request.getHeader(HEADER_NAME))) {
             chain.doFilter(request, response);
             return;
         }
