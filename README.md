@@ -170,6 +170,75 @@ Not every pattern fits everywhere, and forcing one in where it doesn't
 belong would defeat the point — Decorator and Template Method are
 deliberately not used here; nothing in this codebase needed them.
 
+## Observability
+
+Every service exposes Prometheus-formatted metrics at `/actuator/prometheus`
+(added to the existing `health,info` exposure) and exports distributed
+traces via OpenTelemetry to a local Zipkin collector — both come mostly for
+free from Micrometer/Spring Boot Actuator, already a dependency of every
+service, plus `micrometer-registry-prometheus` and
+`micrometer-tracing-bridge-otel` + `opentelemetry-exporter-zipkin` added on
+top of it.
+
+- **Metrics** — JVM, HTTP request, and Hikari connection-pool metrics are
+  auto-instrumented by Actuator with no code changes. `docker compose`
+  brings up a `prometheus` container (`docker/prometheus/prometheus.yml`)
+  that scrapes all seven services on their host ports via
+  `host.docker.internal`, since services run on the host via
+  `mvn spring-boot:run` rather than inside the compose network. Browse
+  metrics/targets at http://localhost:9090.
+- **Distributed tracing** — 100% sampling (`management.tracing.sampling.probability:
+  1.0` — a demo default, not a production one) with spans exported to a
+  `zipkin` container at http://localhost:9411. Inbound HTTP requests get a
+  span automatically; the more interesting piece is **Kafka**, since every
+  hop between saga steps is an async publish/consume rather than a direct
+  call. Each service's `KafkaConfig` explicitly enables Micrometer
+  Observation (`setObservationEnabled(true)`) on both its listener container
+  and its `KafkaTemplate`, which is what lets a single trace ID follow a
+  payment across `payment-api → saga-orchestrator → fraud-service →
+  funds-auth-service → ledger-service → settlement-service` and back,
+  stitched together over Kafka rather than lost at each broker hop.
+- The `/actuator/prometheus` endpoint sits behind the same `/actuator`
+  exemption in `ApiKeyAuthFilter` that already covers `/actuator/health` —
+  scraping is unauthenticated by design, matching how Prometheus itself is
+  normally trusted at the network boundary rather than the app layer.
+
+## Resilience
+
+Every consumer service's `@KafkaListener` method now retries transient
+failures in-process, with exponential backoff, before falling back to
+today's ultimate safety net: log the failure, don't ack, let Kafka
+redeliver. Before this, any failure — transient or not — was caught, logged,
+and silently discarded, which meant the `@Transactional` method actually
+**committed** whatever partial state existed at the point of failure instead
+of rolling it back, and the only retry mechanism was Kafka's own immediate,
+unbounded, zero-backoff redelivery.
+
+`@Transactional(rollbackFor = Exception.class)` and Resilience4j's
+`@Retry(name = "kafka-consumer", fallbackMethod = "...")` sit on the same
+listener method (`resilience4j.retry.instances.kafka-consumer` in each
+service's `application.yml`: 3 attempts, 200ms initial wait, ×2 exponential
+backoff). That combination is safe — not incidental — because Resilience4j's
+`RetryAspect` defaults to a lower `@Order` than Spring's transaction advice
+(`LOWEST_PRECEDENCE - 4` vs. `LOWEST_PRECEDENCE`), so **Retry always wraps
+outside Transactional**: every retry attempt gets a fresh transaction and a
+clean persistence context, and a failed attempt's writes are rolled back
+before the next one starts, rather than accumulating in one open
+transaction. This was verified empirically (a throwaway Spring Boot + H2 app
+using the exact same annotation combination) before being applied here: a
+method that fails once then succeeds ends with exactly one committed row,
+not two; a method that always fails hits exactly `max-attempts` tries with
+the configured backoff between them, then the fallback runs — without the
+exception ever propagating back to the `@KafkaListener` container, so `ack`
+is simply never reached, identical in effect to the old catch block, just
+retried with backoff first.
+
+**Scope boundary**: this only adds backoff to the in-process retry that
+happens *before* Kafka redelivery, not a circuit breaker and not dead-letter
+handling. A genuinely poisoned message (one that will never succeed) still
+loops forever at the outer Kafka-redelivery layer once Resilience4j's bounded
+retries are exhausted each time — that's a separate, not-yet-built concern.
+
 ## Dashboard
 
 `dashboard/` is a small React + AG Grid ops console — a live grid of every
@@ -226,17 +295,20 @@ HOLD, releases the reservation, and restores the payer's balance to its
 exact starting value, ending in `COMPENSATED`. All verified against real
 Kafka and Postgres, not just compiled. On top of that, the
 [Dashboard](#dashboard) above gives a live, browsable view over all of it,
-and every REST endpoint is now gated behind [API-key auth](#security).
+every REST endpoint is gated behind [API-key auth](#security),
+[Observability](#observability) gives Prometheus metrics and Kafka-spanning
+distributed traces across the whole saga, every Kafka listener now retries
+transient failures with exponential backoff before falling back to Kafka
+redelivery (see [Resilience](#resilience)), and [Load testing](#load-testing)
+gives k6 scripts to turn the design doc's capacity estimate into a measured
+number.
 
 **Also on the roadmap** — the difference between a demo and something that
 reads as production-grade:
-- **Observability** — metrics (Micrometer/Prometheus) + distributed tracing across the 4-service saga
-- **Resilience** — circuit breaker + retry policy (Resilience4j); Kafka redelivery gives retries "for free" today but there's no deliberate backoff policy
 - **API documentation** — OpenAPI/Swagger on payment-api
 - **Containerization** — a Dockerfile per service + a compose file that builds from source, so running this doesn't require a local Java/Maven install
 - **Architecture Decision Records** — short docs on why Kafka over Pulsar, why orchestration over choreography
 - **Schema evolution discipline** — every future schema change ships as a new Flyway migration, never editing one already applied
-- **Load testing** — k6/Gatling against payment-api, to turn the design doc's capacity estimate into a measured number
 
 ## Testing
 
@@ -259,12 +331,20 @@ end — every phase since `fraud-service` has shipped with its own tests.
   the **regression pack** for the saga: every scenario in it mirrors
   something that was previously verified by hand with curl + psql, now
   automated so a future change can't silently break it without CI catching it.
+  saga-orchestrator, settlement-service, notification-service, and
+  funds-auth-service's listener tests each also cover the resilience
+  refactor: a collaborator failure now propagates out of the listener
+  method instead of being silently swallowed, with `ack` never called —
+  the plain-Mockito unit tests don't exercise Resilience4j's AOP-driven
+  retry/backoff itself (that needs a real Spring proxy), but they do prove
+  the try/catch removal didn't regress the "don't ack on failure" contract.
 - **Integration test** (Testcontainers — real Postgres + real Kafka, not
   mocks) for payment-api: posts a real payment over HTTP, confirms it's
   persisted, confirms the outbox actually published to a live Kafka topic,
   confirms the `Idempotency-Key` retry path returns the same payment instead
-  of creating a duplicate, and confirms a request with no `X-API-Key` is
-  rejected with `401`.
+  of creating a duplicate, confirms a request with no `X-API-Key` is
+  rejected with `401`, and confirms `/actuator/prometheus` is reachable and
+  actually emits metrics (not just mapped).
 - `common`'s `ApiKeyAuthFilter` has its own unit test covering the correct
   key, a missing key, a wrong key, and an exempt path (`/actuator/**`) — the
   one piece of logic shared identically across all four gated services.
@@ -275,6 +355,27 @@ Testcontainers is tested against; a very new Docker Desktop can trip a
 known compatibility issue between Testcontainers and its bundled
 docker-java client, in which case CI is the source of truth for that one
 test rather than your local machine).
+
+## Load testing
+
+`load-test/` has two k6 scripts against `payment-api`, turning the [design
+doc](RESUME.md)'s capacity estimate — 20 payments/sec average, 100/sec peak
+— into an actual measured number rather than a back-of-envelope guess:
+
+- **`payments-throughput-test.js`** — hits `POST /payments` at exactly
+  those two documented rates back to back, reporting `http_req_duration`
+  percentiles and gating on error rate (`< 1%`, since there's no stated
+  latency SLA to gate on instead).
+- **`saga-completion-latency-test.js`** — measures the other half of the
+  picture: not how fast the API *accepts* a payment (that's instant, by
+  the outbox design), but how long the *whole saga* takes to actually
+  reach `SETTLED`/`FAILED`/`COMPENSATED`, by polling after each POST.
+
+Requires `k6` (`brew install k6`) and the full stack running locally. See
+`load-test/README.md` for exact commands and how to override the target
+host/API key. Manual/local only — not wired into CI, since load tests are
+slow and need the full docker-compose stack up, unlike the unit/integration
+suite `mvn verify` already runs on every push.
 
 ## Running it locally
 
@@ -301,6 +402,8 @@ cd dashboard && npm install && npm run dev     # http://localhost:5173
 ```
 
 Kafka UI is at http://localhost:8081 for browsing topics/messages directly.
+Prometheus is at http://localhost:9090 (metrics/targets), Zipkin is at
+http://localhost:9411 (traces) — see [Observability](#observability).
 
 ### Try it
 
@@ -373,4 +476,5 @@ docker exec payflow-postgres psql -U payflow -d notification \
 ## Tech stack
 
 Java 21 · Spring Boot 3.3.4 · Maven (multi-module) · PostgreSQL 16 · Flyway ·
-Apache Kafka 3.7 (KRaft) · Kafka UI · Docker Compose · Hibernate / Spring Data JPA
+Apache Kafka 3.7 (KRaft) · Kafka UI · Docker Compose · Hibernate / Spring Data JPA ·
+Micrometer / Prometheus · OpenTelemetry / Zipkin · Resilience4j · k6
