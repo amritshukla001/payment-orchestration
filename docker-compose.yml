@@ -47,6 +47,26 @@ services:
     depends_on:
       - kafka
 
+  prometheus:
+    image: prom/prometheus:v2.53.0
+    container_name: payflow-prometheus
+    ports:
+      - "9090:9090"
+    volumes:
+      - ./docker/prometheus/prometheus.yml:/etc/prometheus/prometheus.yml
+      - promdata:/prometheus
+    # Services run on the host via `mvn spring-boot:run`, not in this compose
+    # network, so Prometheus scrapes them through host.docker.internal.
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+
+  zipkin:
+    image: openzipkin/zipkin:2.24
+    container_name: payflow-zipkin
+    ports:
+      - "9411:9411"
+
 volumes:
   pgdata:
   kafkadata:
+  promdata:

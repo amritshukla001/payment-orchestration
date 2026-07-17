@@ -102,6 +102,16 @@ class PaymentApiIntegrationTest {
         assertThat(response.getStatusCode()).isEqualTo(HttpStatus.UNAUTHORIZED);
     }
 
+    @Test
+    void prometheusScrapeEndpointIsExposedAndUnauthenticated() {
+        // Same /actuator exemption as health/info -- Prometheus scrapes without
+        // an API key, same as the health check does today.
+        ResponseEntity<String> response = restTemplate.getForEntity("/actuator/prometheus", String.class);
+
+        assertThat(response.getStatusCode()).isEqualTo(HttpStatus.OK);
+        assertThat(response.getBody()).contains("jvm_memory_used_bytes");
+    }
+
     private HttpHeaders authHeaders() {
         HttpHeaders headers = new HttpHeaders();
         headers.set("X-API-Key", API_KEY);

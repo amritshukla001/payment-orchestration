@@ -36,6 +36,11 @@ public class KafkaConfig {
         ConcurrentKafkaListenerContainerFactory<String, String> factory = new ConcurrentKafkaListenerContainerFactory<>();
         factory.setConsumerFactory(consumerFactory);
         factory.getContainerProperties().setAckMode(ContainerProperties.AckMode.MANUAL);
+        // Enables Micrometer Observation instrumentation for the listener container,
+        // which the tracing bridge turns into consumer spans linked to the producer's span
+        // via the B3 headers embedded in each record -- this is what stitches a trace across
+        // the async Kafka hop between services, not just within one service's own HTTP call.
+        factory.getContainerProperties().setObservationEnabled(true);
         return factory;
     }
 
@@ -54,6 +59,8 @@ public class KafkaConfig {
 
     @Bean
     public KafkaTemplate<String, String> kafkaTemplate(ProducerFactory<String, String> producerFactory) {
-        return new KafkaTemplate<>(producerFactory);
+        KafkaTemplate<String, String> template = new KafkaTemplate<>(producerFactory);
+        template.setObservationEnabled(true);
+        return template;
     }
 }
