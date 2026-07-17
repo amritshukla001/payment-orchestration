@@ -52,6 +52,9 @@ class PaymentApiIntegrationTest {
         registry.add("spring.datasource.password", postgres::getPassword);
         registry.add("spring.kafka.bootstrap-servers", kafka::getBootstrapServers);
         registry.add("payflow.security.api-key", () -> API_KEY);
+        // TEMPORARY diagnostic flag -- to be removed once the CI-only
+        // /actuator/prometheus 404 is root-caused via the conditions report.
+        registry.add("debug", () -> "true");
     }
 
     @Autowired
