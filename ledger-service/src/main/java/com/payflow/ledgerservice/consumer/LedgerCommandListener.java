@@ -12,6 +12,7 @@ import com.payflow.common.events.PaymentEventType;
 import com.payflow.ledgerservice.domain.ProcessedEvent;
 import com.payflow.ledgerservice.ledger.DoubleEntryLedger;
 import com.payflow.ledgerservice.repository.ProcessedEventRepository;
+import io.github.resilience4j.retry.annotation.Retry;
 import org.apache.kafka.clients.consumer.ConsumerRecord;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -46,29 +47,30 @@ public class LedgerCommandListener {
     }
 
     @KafkaListener(topics = "payment.commands", containerFactory = "kafkaListenerContainerFactory")
-    @Transactional
-    public void onCommand(ConsumerRecord<String, String> record, Acknowledgment ack) {
-        try {
-            EventEnvelope envelope = objectMapper.readValue(record.value(), EventEnvelope.class);
+    @Transactional(rollbackFor = Exception.class)
+    @Retry(name = "kafka-consumer", fallbackMethod = "onCommandProcessingFailed")
+    public void onCommand(ConsumerRecord<String, String> record, Acknowledgment ack) throws Exception {
+        EventEnvelope envelope = objectMapper.readValue(record.value(), EventEnvelope.class);
 
-            if (processedEventRepository.existsById(envelope.eventId())) {
-                log.debug("Skipping already-processed command {}", envelope.eventId());
-                ack.acknowledge();
-                return;
-            }
-
-            switch (envelope.eventType()) {
-                case "POST_LEDGER" -> handlePostLedger(envelope);
-                case "POST_FINAL_LEDGER" -> handlePostFinalLedger(envelope);
-                case "REVERSE_LEDGER" -> handleReverseLedger(envelope);
-                default -> { /* not for us */ }
-            }
-
-            processedEventRepository.save(new ProcessedEvent(envelope.eventId(), Instant.now()));
+        if (processedEventRepository.existsById(envelope.eventId())) {
+            log.debug("Skipping already-processed command {}", envelope.eventId());
             ack.acknowledge();
-        } catch (Exception e) {
-            log.error("Failed to process ledger command, will redeliver", e);
+            return;
         }
+
+        switch (envelope.eventType()) {
+            case "POST_LEDGER" -> handlePostLedger(envelope);
+            case "POST_FINAL_LEDGER" -> handlePostFinalLedger(envelope);
+            case "REVERSE_LEDGER" -> handleReverseLedger(envelope);
+            default -> { /* not for us */ }
+        }
+
+        processedEventRepository.save(new ProcessedEvent(envelope.eventId(), Instant.now()));
+        ack.acknowledge();
+    }
+
+    private void onCommandProcessingFailed(ConsumerRecord<String, String> record, Acknowledgment ack, Throwable t) {
+        log.error("Failed to process ledger command after retries exhausted, will redeliver", t);
     }
 
     private void handlePostLedger(EventEnvelope envelope) throws Exception {

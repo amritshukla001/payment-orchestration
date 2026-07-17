@@ -11,6 +11,7 @@ import com.payflow.settlementservice.domain.Settlement;
 import com.payflow.settlementservice.repository.ProcessedEventRepository;
 import com.payflow.settlementservice.repository.SettlementRepository;
 import com.payflow.settlementservice.risk.SettlementRiskCheck;
+import io.github.resilience4j.retry.annotation.Retry;
 import org.apache.kafka.clients.consumer.ConsumerRecord;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -49,40 +50,41 @@ public class SettleCommandListener {
     }
 
     @KafkaListener(topics = "payment.commands", containerFactory = "kafkaListenerContainerFactory")
-    @Transactional
-    public void onCommand(ConsumerRecord<String, String> record, Acknowledgment ack) {
-        try {
-            EventEnvelope envelope = objectMapper.readValue(record.value(), EventEnvelope.class);
+    @Transactional(rollbackFor = Exception.class)
+    @Retry(name = "kafka-consumer", fallbackMethod = "onCommandProcessingFailed")
+    public void onCommand(ConsumerRecord<String, String> record, Acknowledgment ack) throws Exception {
+        EventEnvelope envelope = objectMapper.readValue(record.value(), EventEnvelope.class);
 
-            if (!"SETTLE".equals(envelope.eventType())) {
-                ack.acknowledge();
-                return;
-            }
-            if (processedEventRepository.existsById(envelope.eventId())) {
-                log.debug("Skipping already-processed command {}", envelope.eventId());
-                ack.acknowledge();
-                return;
-            }
-
-            SettleCommand command = objectMapper.treeToValue(envelope.payload(), SettleCommand.class);
-            Optional<String> decline = riskCheck.checkForDecline(command.amountCents());
-
-            if (decline.isPresent()) {
-                publish(command.paymentId(), PaymentEventType.SETTLEMENT_DECLINED,
-                        new SettlementDeclinedEvent(command.paymentId(), decline.get(), Instant.now()));
-                log.info("Payment {} SETTLEMENT_DECLINED: {}", command.paymentId(), decline.get());
-            } else {
-                recordCapture(command);
-                publish(command.paymentId(), PaymentEventType.PAYMENT_SETTLED, new PaymentSettledEvent(
-                        command.paymentId(), command.payerAccount(), command.payeeAccount(), Instant.now()));
-                log.info("Payment {} SETTLED (captured)", command.paymentId());
-            }
-
-            processedEventRepository.save(new ProcessedEvent(envelope.eventId(), Instant.now()));
+        if (!"SETTLE".equals(envelope.eventType())) {
             ack.acknowledge();
-        } catch (Exception e) {
-            log.error("Failed to process settle command, will redeliver", e);
+            return;
         }
+        if (processedEventRepository.existsById(envelope.eventId())) {
+            log.debug("Skipping already-processed command {}", envelope.eventId());
+            ack.acknowledge();
+            return;
+        }
+
+        SettleCommand command = objectMapper.treeToValue(envelope.payload(), SettleCommand.class);
+        Optional<String> decline = riskCheck.checkForDecline(command.amountCents());
+
+        if (decline.isPresent()) {
+            publish(command.paymentId(), PaymentEventType.SETTLEMENT_DECLINED,
+                    new SettlementDeclinedEvent(command.paymentId(), decline.get(), Instant.now()));
+            log.info("Payment {} SETTLEMENT_DECLINED: {}", command.paymentId(), decline.get());
+        } else {
+            recordCapture(command);
+            publish(command.paymentId(), PaymentEventType.PAYMENT_SETTLED, new PaymentSettledEvent(
+                    command.paymentId(), command.payerAccount(), command.payeeAccount(), Instant.now()));
+            log.info("Payment {} SETTLED (captured)", command.paymentId());
+        }
+
+        processedEventRepository.save(new ProcessedEvent(envelope.eventId(), Instant.now()));
+        ack.acknowledge();
+    }
+
+    private void onCommandProcessingFailed(ConsumerRecord<String, String> record, Acknowledgment ack, Throwable t) {
+        log.error("Failed to process settle command after retries exhausted, will redeliver", t);
     }
 
     private void recordCapture(SettleCommand command) {

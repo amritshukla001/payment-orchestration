@@ -26,6 +26,7 @@ import java.util.Map;
 import java.util.UUID;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.*;
 
@@ -132,6 +133,20 @@ class PaymentOutcomeListenerTest {
 
         verifyNoInteractions(notificationRecordRepository);
         verify(ack).acknowledge();
+    }
+
+    @Test
+    void aFailureDuringHandlingPropagatesInsteadOfBeingSwallowed() throws Exception {
+        // See PaymentEventListenerTest's identical test for why.
+        UUID paymentId = UUID.randomUUID();
+        PaymentSettledEvent event = new PaymentSettledEvent(paymentId, UUID.randomUUID(), UUID.randomUUID(), Instant.now());
+        when(notificationRecordRepository.save(any())).thenThrow(new RuntimeException("transient DB blip"));
+
+        assertThatThrownBy(() -> listener.onEvent(recordFor(paymentId, "PAYMENT_SETTLED", event), ack))
+                .isInstanceOf(RuntimeException.class)
+                .hasMessage("transient DB blip");
+
+        verify(ack, never()).acknowledge();
     }
 
     private <T> ConsumerRecord<String, String> recordFor(UUID paymentId, String eventType, T payload) throws Exception {

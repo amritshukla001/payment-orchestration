@@ -34,6 +34,15 @@ management:
     tracing:
       endpoint: http://localhost:9411/api/v2/spans
 
+resilience4j:
+  retry:
+    instances:
+      kafka-consumer:
+        max-attempts: 3
+        wait-duration: 200ms
+        enable-exponential-backoff: true
+        exponential-backoff-multiplier: 2
+
 payflow:
   security:
     api-key: ${PAYFLOW_API_KEY:local-dev-api-key-change-me}

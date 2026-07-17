@@ -21,6 +21,7 @@ import com.payflow.orchestrator.domain.PaymentSagaState;
 import com.payflow.orchestrator.domain.ProcessedEvent;
 import com.payflow.orchestrator.repository.PaymentSagaStateRepository;
 import com.payflow.orchestrator.repository.ProcessedEventRepository;
+import io.github.resilience4j.retry.annotation.Retry;
 import org.apache.kafka.clients.consumer.ConsumerRecord;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -61,25 +62,29 @@ public class PaymentEventListener {
     }
 
     @KafkaListener(topics = "payment.events", containerFactory = "kafkaListenerContainerFactory")
-    @Transactional
-    public void onEvent(ConsumerRecord<String, String> record, Acknowledgment ack) {
-        try {
-            EventEnvelope envelope = objectMapper.readValue(record.value(), EventEnvelope.class);
+    @Transactional(rollbackFor = Exception.class)
+    @Retry(name = "kafka-consumer", fallbackMethod = "onEventProcessingFailed")
+    public void onEvent(ConsumerRecord<String, String> record, Acknowledgment ack) throws Exception {
+        EventEnvelope envelope = objectMapper.readValue(record.value(), EventEnvelope.class);
 
-            if (processedEventRepository.existsById(envelope.eventId())) {
-                log.debug("Skipping already-processed event {}", envelope.eventId());
-                ack.acknowledge();
-                return;
-            }
-
-            handle(envelope);
-            processedEventRepository.save(new ProcessedEvent(envelope.eventId(), Instant.now()));
+        if (processedEventRepository.existsById(envelope.eventId())) {
+            log.debug("Skipping already-processed event {}", envelope.eventId());
             ack.acknowledge();
-        } catch (Exception e) {
-            // No ack — the container will redeliver. Once processed_events
-            // catches up, the retry is a safe no-op, not a double-apply.
-            log.error("Failed to process payment event, will redeliver", e);
+            return;
         }
+
+        handle(envelope);
+        processedEventRepository.save(new ProcessedEvent(envelope.eventId(), Instant.now()));
+        ack.acknowledge();
+    }
+
+    // Invoked once Resilience4j's bounded, backed-off retries (see
+    // application.yml's resilience4j.retry.instances.kafka-consumer) are
+    // exhausted. No ack here either — the container will redeliver. Once
+    // processed_events catches up, the retry is a safe no-op, not a
+    // double-apply.
+    private void onEventProcessingFailed(ConsumerRecord<String, String> record, Acknowledgment ack, Throwable t) {
+        log.error("Failed to process payment event after retries exhausted, will redeliver", t);
     }
 
     private void handle(EventEnvelope envelope) throws Exception {

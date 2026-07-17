@@ -27,6 +27,7 @@ import java.util.UUID;
 import java.util.concurrent.CompletableFuture;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.*;
 import static org.mockito.Mockito.*;
 
@@ -134,6 +135,25 @@ class SettleCommandListenerTest {
         verifyNoInteractions(settlementRepository);
         verifyNoInteractions(kafkaTemplate);
         verify(ack).acknowledge();
+    }
+
+    @Test
+    void aFailureDuringHandlingPropagatesInsteadOfBeingSwallowed() throws Exception {
+        // See PaymentEventListenerTest's identical test for why: the old
+        // try/catch swallowed everything, which would have let a partial
+        // transaction commit; Resilience4j's @Retry (wired up in the real
+        // Spring context, not exercised here) needs the exception to
+        // actually propagate to retry it.
+        UUID paymentId = UUID.randomUUID();
+        SettleCommand command = new SettleCommand(
+                paymentId, UUID.randomUUID(), UUID.randomUUID(), 4_500L, "USD", Instant.now());
+        when(settlementRepository.existsById(paymentId)).thenThrow(new RuntimeException("transient DB blip"));
+
+        assertThatThrownBy(() -> listener.onCommand(recordFor(paymentId, command), ack))
+                .isInstanceOf(RuntimeException.class)
+                .hasMessage("transient DB blip");
+
+        verify(ack, never()).acknowledge();
     }
 
     private ConsumerRecord<String, String> recordFor(UUID paymentId, SettleCommand command) throws Exception {

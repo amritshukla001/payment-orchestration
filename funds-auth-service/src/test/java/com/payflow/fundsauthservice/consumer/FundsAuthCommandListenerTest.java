@@ -24,6 +24,7 @@ import java.util.UUID;
 import java.util.concurrent.CompletableFuture;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.*;
 import static org.mockito.Mockito.*;
 
@@ -82,6 +83,21 @@ class FundsAuthCommandListenerTest {
         assertThat(published.eventType()).isEqualTo("FUNDS_RELEASED");
         FundsReleasedEvent event = objectMapper.treeToValue(published.payload(), FundsReleasedEvent.class);
         assertThat(event.paymentId()).isEqualTo(paymentId);
+    }
+
+    @Test
+    void aFailureDuringHandlingPropagatesInsteadOfBeingSwallowed() throws Exception {
+        // See PaymentEventListenerTest's identical test for why.
+        UUID paymentId = UUID.randomUUID();
+        UUID payerAccount = UUID.randomUUID();
+        AuthorizeFundsCommand command = new AuthorizeFundsCommand(paymentId, payerAccount, 5_000L, "USD", Instant.now());
+        when(bankLedger.reserve(paymentId, payerAccount, 5_000L)).thenThrow(new RuntimeException("transient bank blip"));
+
+        assertThatThrownBy(() -> listener.onCommand(recordFor(paymentId, "AUTHORIZE_FUNDS", command), ack))
+                .isInstanceOf(RuntimeException.class)
+                .hasMessage("transient bank blip");
+
+        verify(ack, never()).acknowledge();
     }
 
     private <T> ConsumerRecord<String, String> recordFor(UUID paymentId, String eventType, T payload) throws Exception {

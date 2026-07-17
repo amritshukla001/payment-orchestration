@@ -31,6 +31,7 @@ import java.util.UUID;
 import java.util.concurrent.CompletableFuture;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.*;
 import static org.mockito.Mockito.*;
 
@@ -284,6 +285,28 @@ class PaymentEventListenerTest {
         verify(sagaStateRepository, never()).save(any());
         verifyNoInteractions(kafkaTemplate);
         verify(ack).acknowledge();
+    }
+
+    @Test
+    void aFailureDuringHandlingPropagatesInsteadOfBeingSwallowed() throws Exception {
+        // Resilience4j's @Retry only retries a method that actually throws --
+        // this proves the old try/catch (which swallowed everything and let
+        // the transaction commit partial state) is gone, and a failure is
+        // now visible to the caller instead of silently logged. In the real
+        // app that caller is the Retry-then-Transactional AOP proxy, not a
+        // plain-Mockito listener like this one, so this test doesn't exercise
+        // retry/backoff itself -- it just characterizes that a failure is no
+        // longer swallowed at the method level.
+        UUID paymentId = UUID.randomUUID();
+        PaymentInitiatedEvent event = new PaymentInitiatedEvent(
+                paymentId, UUID.randomUUID(), UUID.randomUUID(), 5_000L, "USD", Instant.now());
+        when(sagaStateRepository.save(any())).thenThrow(new RuntimeException("transient DB blip"));
+
+        assertThatThrownBy(() -> listener.onEvent(recordFor(paymentId, PaymentEventType.PAYMENT_INITIATED, event), ack))
+                .isInstanceOf(RuntimeException.class)
+                .hasMessage("transient DB blip");
+
+        verify(ack, never()).acknowledge();
     }
 
     // --- helpers -------------------------------------------------------

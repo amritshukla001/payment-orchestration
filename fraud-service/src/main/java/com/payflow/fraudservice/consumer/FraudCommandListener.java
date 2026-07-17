@@ -10,6 +10,7 @@ import com.payflow.fraudservice.domain.ProcessedEvent;
 import com.payflow.fraudservice.repository.ProcessedEventRepository;
 import com.payflow.fraudservice.rules.FraudRuleEngine;
 import com.payflow.fraudservice.rules.Verdict;
+import io.github.resilience4j.retry.annotation.Retry;
 import org.apache.kafka.clients.consumer.ConsumerRecord;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -44,39 +45,40 @@ public class FraudCommandListener {
     }
 
     @KafkaListener(topics = "payment.commands", containerFactory = "kafkaListenerContainerFactory")
-    @Transactional
-    public void onCommand(ConsumerRecord<String, String> record, Acknowledgment ack) {
-        try {
-            EventEnvelope envelope = objectMapper.readValue(record.value(), EventEnvelope.class);
+    @Transactional(rollbackFor = Exception.class)
+    @Retry(name = "kafka-consumer", fallbackMethod = "onCommandProcessingFailed")
+    public void onCommand(ConsumerRecord<String, String> record, Acknowledgment ack) throws Exception {
+        EventEnvelope envelope = objectMapper.readValue(record.value(), EventEnvelope.class);
 
-            if (!"CHECK_FRAUD".equals(envelope.eventType())) {
-                ack.acknowledge();
-                return;
-            }
-            if (processedEventRepository.existsById(envelope.eventId())) {
-                log.debug("Skipping already-processed command {}", envelope.eventId());
-                ack.acknowledge();
-                return;
-            }
-
-            CheckFraudCommand command = objectMapper.treeToValue(envelope.payload(), CheckFraudCommand.class);
-            Verdict verdict = ruleEngine.evaluate(command);
-
-            if (verdict.approved()) {
-                publish(command.paymentId(), PaymentEventType.FRAUD_APPROVED,
-                        new FraudApprovedEvent(command.paymentId(), Instant.now()));
-                log.info("Payment {} fraud check APPROVED", command.paymentId());
-            } else {
-                publish(command.paymentId(), PaymentEventType.FRAUD_REJECTED,
-                        new FraudRejectedEvent(command.paymentId(), verdict.reason(), Instant.now()));
-                log.info("Payment {} fraud check REJECTED: {}", command.paymentId(), verdict.reason());
-            }
-
-            processedEventRepository.save(new ProcessedEvent(envelope.eventId(), Instant.now()));
+        if (!"CHECK_FRAUD".equals(envelope.eventType())) {
             ack.acknowledge();
-        } catch (Exception e) {
-            log.error("Failed to process fraud command, will redeliver", e);
+            return;
         }
+        if (processedEventRepository.existsById(envelope.eventId())) {
+            log.debug("Skipping already-processed command {}", envelope.eventId());
+            ack.acknowledge();
+            return;
+        }
+
+        CheckFraudCommand command = objectMapper.treeToValue(envelope.payload(), CheckFraudCommand.class);
+        Verdict verdict = ruleEngine.evaluate(command);
+
+        if (verdict.approved()) {
+            publish(command.paymentId(), PaymentEventType.FRAUD_APPROVED,
+                    new FraudApprovedEvent(command.paymentId(), Instant.now()));
+            log.info("Payment {} fraud check APPROVED", command.paymentId());
+        } else {
+            publish(command.paymentId(), PaymentEventType.FRAUD_REJECTED,
+                    new FraudRejectedEvent(command.paymentId(), verdict.reason(), Instant.now()));
+            log.info("Payment {} fraud check REJECTED: {}", command.paymentId(), verdict.reason());
+        }
+
+        processedEventRepository.save(new ProcessedEvent(envelope.eventId(), Instant.now()));
+        ack.acknowledge();
+    }
+
+    private void onCommandProcessingFailed(ConsumerRecord<String, String> record, Acknowledgment ack, Throwable t) {
+        log.error("Failed to process fraud command after retries exhausted, will redeliver", t);
     }
 
     private void publish(UUID paymentId, PaymentEventType type, Object payload) throws Exception {

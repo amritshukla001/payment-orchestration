@@ -11,6 +11,7 @@ import com.payflow.common.events.PaymentEventType;
 import com.payflow.fundsauthservice.bank.MockBankLedger;
 import com.payflow.fundsauthservice.domain.ProcessedEvent;
 import com.payflow.fundsauthservice.repository.ProcessedEventRepository;
+import io.github.resilience4j.retry.annotation.Retry;
 import org.apache.kafka.clients.consumer.ConsumerRecord;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -45,20 +46,21 @@ public class FundsAuthCommandListener {
     }
 
     @KafkaListener(topics = "payment.commands", containerFactory = "kafkaListenerContainerFactory")
-    @Transactional
-    public void onCommand(ConsumerRecord<String, String> record, Acknowledgment ack) {
-        try {
-            EventEnvelope envelope = objectMapper.readValue(record.value(), EventEnvelope.class);
+    @Transactional(rollbackFor = Exception.class)
+    @Retry(name = "kafka-consumer", fallbackMethod = "onCommandProcessingFailed")
+    public void onCommand(ConsumerRecord<String, String> record, Acknowledgment ack) throws Exception {
+        EventEnvelope envelope = objectMapper.readValue(record.value(), EventEnvelope.class);
 
-            switch (envelope.eventType()) {
-                case "AUTHORIZE_FUNDS" -> handleAuthorize(envelope);
-                case "RELEASE_FUNDS" -> handleRelease(envelope);
-                default -> { /* not for us */ }
-            }
-            ack.acknowledge();
-        } catch (Exception e) {
-            log.error("Failed to process funds-auth command, will redeliver", e);
+        switch (envelope.eventType()) {
+            case "AUTHORIZE_FUNDS" -> handleAuthorize(envelope);
+            case "RELEASE_FUNDS" -> handleRelease(envelope);
+            default -> { /* not for us */ }
         }
+        ack.acknowledge();
+    }
+
+    private void onCommandProcessingFailed(ConsumerRecord<String, String> record, Acknowledgment ack, Throwable t) {
+        log.error("Failed to process funds-auth command after retries exhausted, will redeliver", t);
     }
 
     private void handleAuthorize(EventEnvelope envelope) throws Exception {

@@ -11,6 +11,7 @@ import com.payflow.notificationservice.domain.ProcessedEvent;
 import com.payflow.notificationservice.domain.Recipient;
 import com.payflow.notificationservice.repository.NotificationRecordRepository;
 import com.payflow.notificationservice.repository.ProcessedEventRepository;
+import io.github.resilience4j.retry.annotation.Retry;
 import org.apache.kafka.clients.consumer.ConsumerRecord;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -48,29 +49,30 @@ public class PaymentOutcomeListener {
     }
 
     @KafkaListener(topics = "payment.events", containerFactory = "kafkaListenerContainerFactory")
-    @Transactional
-    public void onEvent(ConsumerRecord<String, String> record, Acknowledgment ack) {
-        try {
-            EventEnvelope envelope = objectMapper.readValue(record.value(), EventEnvelope.class);
+    @Transactional(rollbackFor = Exception.class)
+    @Retry(name = "kafka-consumer", fallbackMethod = "onEventProcessingFailed")
+    public void onEvent(ConsumerRecord<String, String> record, Acknowledgment ack) throws Exception {
+        EventEnvelope envelope = objectMapper.readValue(record.value(), EventEnvelope.class);
 
-            if (processedEventRepository.existsById(envelope.eventId())) {
-                log.debug("Skipping already-processed event {}", envelope.eventId());
-                ack.acknowledge();
-                return;
-            }
-
-            switch (envelope.eventType()) {
-                case "PAYMENT_SETTLED" -> onPaymentSettled(envelope);
-                case "PAYMENT_FAILED" -> onPaymentFailed(envelope);
-                case "PAYMENT_COMPENSATED" -> onPaymentCompensated(envelope);
-                default -> { /* not a terminal outcome we notify on */ }
-            }
-
-            processedEventRepository.save(new ProcessedEvent(envelope.eventId(), Instant.now()));
+        if (processedEventRepository.existsById(envelope.eventId())) {
+            log.debug("Skipping already-processed event {}", envelope.eventId());
             ack.acknowledge();
-        } catch (Exception e) {
-            log.error("Failed to process payment event, will redeliver", e);
+            return;
         }
+
+        switch (envelope.eventType()) {
+            case "PAYMENT_SETTLED" -> onPaymentSettled(envelope);
+            case "PAYMENT_FAILED" -> onPaymentFailed(envelope);
+            case "PAYMENT_COMPENSATED" -> onPaymentCompensated(envelope);
+            default -> { /* not a terminal outcome we notify on */ }
+        }
+
+        processedEventRepository.save(new ProcessedEvent(envelope.eventId(), Instant.now()));
+        ack.acknowledge();
+    }
+
+    private void onEventProcessingFailed(ConsumerRecord<String, String> record, Acknowledgment ack, Throwable t) {
+        log.error("Failed to process payment event after retries exhausted, will redeliver", t);
     }
 
     private void onPaymentSettled(EventEnvelope envelope) throws Exception {
