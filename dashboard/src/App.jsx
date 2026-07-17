@@ -185,17 +185,19 @@ export default function App() {
       </div>
 
       <div className="grid-shell">
-        <AgGridReact
-          ref={gridRef}
-          theme={gridTheme}
-          rowData={sagas}
-          columnDefs={columnDefs}
-          getRowId={(p) => p.data.paymentId}
-          onRowClicked={(e) => openDetail(e.data)}
-          rowSelection={{ mode: "singleRow" }}
-          animateRows={true}
-          tooltipShowDelay={200}
-        />
+        <div className="grid-shell__inner">
+          <AgGridReact
+            ref={gridRef}
+            theme={gridTheme}
+            rowData={sagas}
+            columnDefs={columnDefs}
+            getRowId={(p) => p.data.paymentId}
+            onRowClicked={(e) => openDetail(e.data)}
+            rowSelection={{ mode: "singleRow" }}
+            animateRows={true}
+            tooltipShowDelay={200}
+          />
+        </div>
       </div>
 
       {selected && (

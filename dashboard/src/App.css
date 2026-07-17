@@ -80,6 +80,17 @@
   border-radius: 10px;
   overflow: hidden;
   border: 1px solid var(--border);
+  /* Positioned so .grid-shell__inner can be absolutely sized against it --
+     ag-grid needs a container with a definite size at mount, and a
+     flex-grow height isn't resolved synchronously early enough for it in
+     this React/Vite combination, which otherwise leaves every cell's text
+     rendered at zero width. */
+  position: relative;
+}
+
+.grid-shell__inner {
+  position: absolute;
+  inset: 0;
 }
 
 /* --- drawer --- */
