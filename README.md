@@ -158,6 +158,13 @@ balance restored to its exact starting value, the funds reservation marked
 - **Factory Method** — static factories on result types (`Verdict.approve()` /
   `.reject()`), and Spring's `ConsumerFactory`/`ProducerFactory` beans.
 - **Repository** — every `JpaRepository` interface.
+- **Proxy** — every `JpaRepository` interface is also this: Spring Data
+  generates a runtime proxy implementation, never a class we write. Same
+  mechanism drives [Resilience](#resilience): `@Retry` and `@Transactional`
+  on the same listener method both work via generated proxies
+  (`RetryAspect`, `TransactionInterceptor`) intercepting the call and adding
+  behavior — retry-with-backoff, transaction begin/commit — before
+  delegating to the real bean.
 - **Singleton** — every Spring-managed `@Component`/`@Service` bean.
 - **Observer** — notification-service subscribes to `payment.events` as a
   passive observer of terminal outcomes, distinct from every other
