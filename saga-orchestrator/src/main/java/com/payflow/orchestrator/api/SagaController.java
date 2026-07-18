@@ -17,7 +17,6 @@ import java.util.UUID;
  */
 @RestController
 @RequestMapping("/api/sagas")
-@CrossOrigin(origins = {"http://localhost:5173", "http://localhost:4173"})
 public class SagaController {
 
     private final PaymentSagaStateRepository repository;

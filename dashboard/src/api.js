@@ -1,10 +1,7 @@
-// Each service owns its own database and its own port -- there is no API
-// gateway in front of them (an explicitly deferred roadmap item), so the
-// dashboard talks to saga-orchestrator, ledger-service, and
-// notification-service directly, each on its own origin.
-const ORCHESTRATOR_URL = "http://localhost:8082";
-const LEDGER_URL = "http://localhost:8085";
-const NOTIFICATION_URL = "http://localhost:8087";
+// Each service still owns its own database and its own port, but the
+// dashboard no longer needs to know any of them -- it talks to the API
+// gateway's single origin, which routes each path to the right service.
+const GATEWAY_URL = "http://localhost:8088";
 
 // Matches each service's PAYFLOW_API_KEY default (local-dev-api-key-change-me)
 // unless overridden -- see dashboard/README.md. A key shipped in frontend JS
@@ -21,13 +18,13 @@ async function getJson(url) {
 }
 
 export function fetchSagas() {
-  return getJson(`${ORCHESTRATOR_URL}/api/sagas`);
+  return getJson(`${GATEWAY_URL}/api/sagas`);
 }
 
 export function fetchLedgerEntries(paymentId) {
-  return getJson(`${LEDGER_URL}/api/ledger/${paymentId}`);
+  return getJson(`${GATEWAY_URL}/api/ledger/${paymentId}`);
 }
 
 export function fetchNotifications(paymentId) {
-  return getJson(`${NOTIFICATION_URL}/api/notifications/${paymentId}`);
+  return getJson(`${GATEWAY_URL}/api/notifications/${paymentId}`);
 }

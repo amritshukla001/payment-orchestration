@@ -287,6 +287,52 @@ Acceptable specifically because `reserve()`/`release()` never read from the
 cache themselves — only `getBalance()`'s (currently test-only) callers ever
 see a stale value, never the authorization decision.
 
+## API Gateway
+
+`api-gateway` (port 8088) is a Spring Cloud Gateway (reactive/WebFlux)
+service sitting in front of the four REST-exposing services — `payment-api`,
+`saga-orchestrator`, `ledger-service`, `notification-service` — routing by
+path (`/payments/**` → `payment-api`, `/api/sagas/**` → `saga-orchestrator`,
+`/api/ledger/**` → `ledger-service`, `/api/notifications/**` →
+`notification-service`). `fraud-service`, `funds-auth-service`, and
+`settlement-service` are Kafka-only and have nothing to route to.
+
+A custom `AuthGlobalFilter` validates `X-API-Key` at the edge before a
+request reaches any route — the same header, property, and default as
+every backend service's own check (see [Security](#security)). It's
+ordered to run before rate limiting (`getOrder()` returns a negative value,
+lower than the `RequestRateLimiter` filter's implicit `0`), so a bad-key
+request is rejected before it can consume a legitimate client's rate-limit
+budget.
+
+`POST /payments` specifically — the client-facing write that actually
+drives a saga through fraud, funds, ledger, and settlement — is
+rate-limited via Spring Cloud Gateway's built-in Redis-backed
+`RequestRateLimiter` (reusing the same `payflow-redis` container from
+[Caching](#caching)), keyed per `X-API-Key` by a custom `KeyResolver` bean.
+`replenishRate: 20`, `burstCapacity: 40` are deliberately the same numbers
+[Load testing](#load-testing)'s k6 scripts already use for average (20/s)
+and peak (100/s) load — meaning a peak-scenario k6 run against the gateway
+(not yet done) would start seeing `429`s once the burst bucket empties, a
+real interaction between two roadmap items worth exploring as a follow-up.
+`GET` reads on `payment-api` are not rate-limited, since they're cheap and
+idempotent.
+
+CORS is now centralized via `spring.cloud.gateway.globalcors` instead of
+being duplicated per controller — the `@CrossOrigin` annotations on
+`SagaController`, `LedgerController`, and `NotificationController` are
+gone, since nothing browser-based calls those services directly anymore.
+
+`/actuator/gateway/routes` (exempted from auth like every other
+`/actuator/**` path) lists the live route table — useful for confirming
+routing config loaded as expected.
+
+The four backend services keep their own `SecurityConfig`/`ApiKeyAuthFilter`
+unchanged, deliberately: there's no network isolation between the gateway
+and the backend ports on a local machine, so removing per-service auth
+would be a real regression, not just redundancy. The gateway is a first
+checkpoint, not a replacement for the others.
+
 ## Dashboard
 
 `dashboard/` is a small React + AG Grid ops console — a live grid of every
@@ -295,20 +341,19 @@ ledger postings and notifications. It's deliberately *not* a new backend
 service: it's a thin client polling three read-only REST APIs added to
 existing services —
 
-- `GET /api/sagas` (saga-orchestrator, port 8082) — the grid itself.
-  This is the only service whose view of a payment reflects its *current*
-  state; `payment-api`'s own `payments` row is stamped `INITIATED` at
-  creation and never updated again, since it has no Kafka consumer of its
-  own.
-- `GET /api/ledger/{paymentId}` (ledger-service, port 8085) — the double-entry
-  postings shown in the drawer.
-- `GET /api/notifications/{paymentId}` (notification-service, port 8087) —
-  the notifications shown in the drawer.
+- `GET /api/sagas` — the grid itself. This is the only service whose view
+  of a payment reflects its *current* state; `payment-api`'s own `payments`
+  row is stamped `INITIATED` at creation and never updated again, since it
+  has no Kafka consumer of its own.
+- `GET /api/ledger/{paymentId}` — the double-entry postings shown in the
+  drawer.
+- `GET /api/notifications/{paymentId}` — the notifications shown in the
+  drawer.
 
-There's no API gateway in front of these yet (still on the roadmap below),
-so the frontend calls each service's port directly; each controller has
-`@CrossOrigin` opened for the Vite dev server's origin. See
-`dashboard/README.md` for how to run it.
+All three go through the [API Gateway](#api-gateway) at
+`http://localhost:8088` rather than each service's own port — the frontend
+knows one origin, and CORS is handled once at the gateway rather than
+per-controller. See `dashboard/README.md` for how to run it.
 
 ## Security
 
@@ -326,6 +371,13 @@ auth boundary itself, not building a credential-management system.
 unauthenticated. `fraud-service`, `funds-auth-service`, and
 `settlement-service` have no custom REST endpoints (Kafka-only), so there's
 nothing to gate on them beyond actuator.
+
+The [API Gateway](#api-gateway) adds the same check again at the edge
+(`AuthGlobalFilter`, checking the same header against the same
+`payflow.security.api-key` value) before a request reaches any backend —
+deliberately in addition to, not instead of, each service's own check,
+since backend ports remain directly reachable with no network isolation
+locally.
 
 ## Status
 
@@ -349,8 +401,11 @@ distributed traces across the whole saga, every Kafka listener now retries
 transient failures with exponential backoff before falling back to Kafka
 redelivery (see [Resilience](#resilience)), [Load testing](#load-testing)
 gives k6 scripts to turn the design doc's capacity estimate into a measured
-number, and funds-auth-service now cache-asides account balance in Redis
-behind a circuit breaker (see [Caching](#caching)).
+number, funds-auth-service now cache-asides account balance in Redis
+behind a circuit breaker (see [Caching](#caching)), and a Spring Cloud
+Gateway edge service now fronts the four REST-exposing services with
+centralized routing, auth, rate limiting, and CORS (see
+[API Gateway](#api-gateway)).
 
 **Also on the roadmap** — the difference between a demo and something that
 reads as production-grade:
@@ -360,7 +415,6 @@ reads as production-grade:
 - **Schema evolution discipline** — every future schema change ships as a new Flyway migration, never editing one already applied
 - **CQRS read model** — the design doc names this but it was never built: today the dashboard's read APIs (`GET /api/sagas`, `GET /api/ledger/{id}`, `GET /api/notifications/{id}`) each query their own service's primary write-side table directly, not a separate projection. A real CQRS read model would be a dedicated service subscribing to `payment.events`/`payment.commands`, building a denormalized table purpose-shaped for the dashboard's queries, asynchronously consistent with — and decoupled from — the write-side services' own transactional stores
 - **Event sourcing** — not used, and today's state model is the opposite of it: `PaymentSagaState.advanceTo()` and `Account.debit()`/`credit()` mutate a current-value column in place (`state`, `balanceCents`), guarded by `@Version` optimistic locking, rather than deriving state by folding over a persisted, replayable event log. Kafka's `payment.events`/`payment.commands` carry facts *between* services but aren't retained/replayable as each service's system of record — a service restarting with an empty database couldn't rebuild its state from them. Actually event-sourcing an aggregate (most naturally the saga state machine) would mean storing every state transition as an immutable event and computing `state` as a projection over them on read, rather than persisting `state` itself
-- **API gateway** — mentioned in passing under [Dashboard](#dashboard) but never actually built. Would consolidate three things currently duplicated or missing: **authentication** (`ApiKeyAuthFilter` registration is copy-pasted across 4 services' own `SecurityConfig` — `payment-api`, `saga-orchestrator`, `ledger-service`, `notification-service` — instead of enforced in one place), **routing** (clients currently have to know each service's own port and call it directly, e.g. the dashboard hitting `:8082`, `:8085`, `:8087` individually, instead of one host with path-based routing), and **rate limiting** (nothing today throttles `payment-api`'s client-facing `POST /payments`, or any endpoint, per key or client — see the rate-limiting gap noted above). CORS falls out of the same consolidation for free: `@CrossOrigin(origins = {"http://localhost:5173", "http://localhost:4173"})` is currently duplicated verbatim on 3 controllers rather than configured once at the edge
 - **ML fraud-risk scorer as a new `FraudRule`** — `fraud-service`'s `FraudRuleEngine` already uses Strategy (`HighValueThresholdRule`, `PositiveAmountRule`); add a rule that calls a small classifier (trained on synthetic transaction features: amount, velocity, account age) for a risk score alongside the existing deterministic rules. The interesting part: wrap the call in Resilience4j's `@CircuitBreaker` (the same `resilience4j-spring-boot3` dependency, now also used by [Caching](#caching)'s Redis lookup) so a down/slow ML service degrades to the existing rules instead of blocking the saga. Keeps the core fraud decision path deterministic and testable; the ML piece is additive, not load-bearing
 
 ## Ideas under discussion
@@ -458,6 +512,7 @@ cd funds-auth-service && mvn spring-boot:run   # :8084
 cd ledger-service && mvn spring-boot:run       # :8085
 cd settlement-service && mvn spring-boot:run   # :8086
 cd notification-service && mvn spring-boot:run # :8087
+cd api-gateway && mvn spring-boot:run          # :8088
 
 # 4. (optional) Start the dashboard
 cd dashboard && npm install && npm run dev     # http://localhost:5173
@@ -468,6 +523,18 @@ Prometheus is at http://localhost:9090 (metrics/targets), Zipkin is at
 http://localhost:9411 (traces) — see [Observability](#observability).
 
 ### Try it
+
+`payment-api` is still reachable directly on `:8080` for the walkthrough
+below, or through the [API Gateway](#api-gateway) on `:8088` with the exact
+same headers and body:
+
+```bash
+curl -i -X POST http://localhost:8088/payments \
+  -H "Content-Type: application/json" \
+  -H "Idempotency-Key: demo-gateway-1" \
+  -H "X-API-Key: local-dev-api-key-change-me" \
+  -d '{"payerAccount":"11111111-1111-1111-1111-111111111111","payeeAccount":"22222222-2222-2222-2222-222222222222","amountCents":2500,"currency":"USD"}'
+```
 
 ```bash
 curl -i -X POST http://localhost:8080/payments \
@@ -539,4 +606,5 @@ docker exec payflow-postgres psql -U payflow -d notification \
 
 Java 21 · Spring Boot 3.3.4 · Maven (multi-module) · PostgreSQL 16 · Flyway ·
 Apache Kafka 3.7 (KRaft) · Kafka UI · Docker Compose · Hibernate / Spring Data JPA ·
-Micrometer / Prometheus · OpenTelemetry / Zipkin · Resilience4j · k6 · Redis
+Micrometer / Prometheus · OpenTelemetry / Zipkin · Resilience4j · k6 · Redis ·
+Spring Cloud Gateway

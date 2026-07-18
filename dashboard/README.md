@@ -2,13 +2,14 @@
 
 A read-only React + AG Grid dashboard over the running payment-orchestration
 services. There's no dashboard-specific backend or query database here — it
-polls three services' existing REST APIs directly:
+polls three existing REST APIs through the API Gateway (`http://localhost:8088`,
+see the root README's [API Gateway](../README.md#api-gateway) section):
 
-| Service | Port | Endpoint | Used for |
-|---|---|---|---|
-| saga-orchestrator | 8082 | `GET /api/sagas` | the live grid of payments and their current state |
-| ledger-service | 8085 | `GET /api/ledger/{paymentId}` | double-entry postings in the detail drawer |
-| notification-service | 8087 | `GET /api/notifications/{paymentId}` | sent notifications in the detail drawer |
+| Endpoint (via gateway) | Backing service | Used for |
+|---|---|---|
+| `GET /api/sagas` | saga-orchestrator | the live grid of payments and their current state |
+| `GET /api/ledger/{paymentId}` | ledger-service | double-entry postings in the detail drawer |
+| `GET /api/notifications/{paymentId}` | notification-service | sent notifications in the detail drawer |
 
 `saga-orchestrator` is the only service whose view of a payment reflects its
 *current* state — `payment-api`'s own `payments` row is stamped `INITIATED`
@@ -17,8 +18,8 @@ own. That's why the grid reads from the orchestrator, not payment-api.
 
 ## Running it
 
-Requires the rest of the stack (Postgres, Kafka, and all 7 Spring Boot
-services) already running — see the root `README.md`.
+Requires the rest of the stack (Postgres, Kafka, all 7 Spring Boot services,
+and the `api-gateway`) already running — see the root `README.md`.
 
 ```bash
 npm install
@@ -29,17 +30,19 @@ Opens on `http://localhost:5173`. The grid polls `/api/sagas` every 3
 seconds; click any row to open a drawer with that payment's ledger postings
 and notifications.
 
-There's no API gateway in front of the services (an explicitly deferred
-roadmap item), so the dashboard calls each service's port directly and
-relies on the `@CrossOrigin` annotations already added to each read
-controller.
+All requests go through the API Gateway's single origin
+(`http://localhost:8088`), which handles routing to the right backend
+service and CORS for the Vite dev server's origin centrally — see the root
+README's [API Gateway](../README.md#api-gateway) section.
 
 ## Auth
 
-Every service now requires an `X-API-Key` header (see the root README's
-Security section). The dashboard sends one on every request, read from
-`VITE_API_KEY` at build/dev time, falling back to the same
-`local-dev-api-key-change-me` default the backend services fall back to:
+Every service now requires an `X-API-Key` header, checked both by the
+gateway at the edge and by each backend service itself (see the root
+README's [Security](../README.md#security) section). The dashboard sends
+one on every request, read from `VITE_API_KEY` at build/dev time, falling
+back to the same `local-dev-api-key-change-me` default the backend services
+fall back to:
 
 ```bash
 VITE_API_KEY=your-key npm run dev

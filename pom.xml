@@ -15,7 +15,12 @@
   <parent>
     <groupId>org.springframework.boot</groupId>
     <artifactId>spring-boot-starter-parent</artifactId>
-    <version>3.3.4</version>
+    <!-- 3.3.13, not 3.3.4: spring-cloud-gateway-server:4.1.9 (pulled in by
+         the API gateway module) calls HttpHeaders.headerSet(), added to
+         Spring Framework between 6.1.13 (Boot 3.3.4) and 6.1.21 (Boot
+         3.3.13), confirmed by a NoSuchMethodError at gateway runtime
+         before this bump. Still 3.3.x, no breaking Boot changes. -->
+    <version>3.3.13</version>
     <relativePath/>
   </parent>
 
@@ -38,6 +43,7 @@
     <module>ledger-service</module>
     <module>settlement-service</module>
     <module>notification-service</module>
+    <module>api-gateway</module>
   </modules>
 
   <dependencyManagement>
@@ -53,6 +59,16 @@
         <groupId>io.github.resilience4j</groupId>
         <artifactId>resilience4j-bom</artifactId>
         <version>2.3.0</version>
+        <type>pom</type>
+        <scope>import</scope>
+      </dependency>
+      <!-- Spring Boot's own BOM doesn't manage Spring Cloud either,
+           same reasoning as Resilience4j above. 2023.0.x ("Leyton") is
+           the release train compatible with Spring Boot 3.3.x. -->
+      <dependency>
+        <groupId>org.springframework.cloud</groupId>
+        <artifactId>spring-cloud-dependencies</artifactId>
+        <version>2023.0.6</version>
         <type>pom</type>
         <scope>import</scope>
       </dependency>
