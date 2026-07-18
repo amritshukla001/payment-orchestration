@@ -22,6 +22,21 @@ spring:
   kafka:
     bootstrap-servers: localhost:9092
 
+  data:
+    redis:
+      host: localhost
+      port: 6379
+      timeout: 500ms
+      # Only spring.cache/@Cacheable is used here (accountBalances), not
+      # Spring Data Redis's repository abstraction -- without this, startup
+      # logs a spurious "could not safely identify store assignment"
+      # warning for every existing JPA repository in this service.
+      repositories:
+        enabled: false
+
+  cache:
+    type: redis
+
 management:
   endpoints:
     web:
@@ -42,3 +57,10 @@ resilience4j:
         wait-duration: 200ms
         enable-exponential-backoff: true
         exponential-backoff-multiplier: 2
+  circuitbreaker:
+    instances:
+      account-balance-cache:
+        sliding-window-size: 10
+        failure-rate-threshold: 50
+        wait-duration-in-open-state: 5s
+        permitted-number-of-calls-in-half-open-state: 3

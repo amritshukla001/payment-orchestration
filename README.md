@@ -246,6 +246,47 @@ handling. A genuinely poisoned message (one that will never succeed) still
 loops forever at the outer Kafka-redelivery layer once Resilience4j's bounded
 retries are exhausted each time — that's a separate, not-yet-built concern.
 
+## Caching
+
+`funds-auth-service` cache-asides an account's balance in Redis behind a new
+read-only `MockBankLedger.getBalance()` — not something `reserve()`/`release()`
+themselves use. That's deliberate: those two methods are the read-modify-write
+that actually moves money, so they always read Postgres directly; a cache
+should never be trusted for the value a fund-authorization decision hinges
+on. `getBalance()` is for callers that tolerate a briefly stale value in
+exchange for not hitting Postgres on every read — the design doc's stated
+use case is a fraud velocity check (not yet wired up; see the roadmap).
+
+`@Cacheable(cacheNames = "accountBalances", key = "#accountId")` and
+Resilience4j's `@CircuitBreaker(name = "account-balance-cache",
+fallbackMethod = "getBalanceFallback")` sit on the same method, the same
+"why this is safe" question as [Resilience](#resilience)'s
+`@Retry`+`@Transactional` combination: Resilience4j's `CircuitBreakerAspect`
+defaults to a lower `@Order` than Spring's cache advice, so **CircuitBreaker
+wraps outside Cacheable**, and Spring's default `CacheErrorHandler` rethrows
+cache-get failures rather than swallowing them — meaning a Redis outage
+surfaces as an exception the circuit breaker can actually catch and redirect
+to the fallback, instead of disappearing silently. Verified empirically
+(a throwaway Spring Boot + real Redis container, killed mid-test) before
+being applied here: with Redis up, a second `getBalance()` call for the same
+account is a genuine cache hit (no second Postgres read); with Redis down,
+the call still returns the correct value via the fallback, with no exception
+reaching the caller.
+
+Eviction is the opposite choice from `@Retry`+`@Transactional`'s annotation-first
+approach, on purpose: `reserve()`/`release()` call `cacheManager.evict(...)`
+manually in a try/catch after their existing `accountRepository.save(...)`,
+rather than using `@CacheEvict`. An annotation-based evict failure would
+propagate into the caller's `@Transactional` scope
+(`FundsAuthCommandListener.onCommand`) — meaning a Redis outage could break
+fund reservation itself, exactly the single point of failure a cache is
+supposed to avoid. The tradeoff this accepts: eviction is best-effort, so a
+Redis outage during a write can leave `getBalance()` serving a stale value
+until the next successful write's eviction succeeds or Redis recovers.
+Acceptable specifically because `reserve()`/`release()` never read from the
+cache themselves — only `getBalance()`'s (currently test-only) callers ever
+see a stale value, never the authorization decision.
+
 ## Dashboard
 
 `dashboard/` is a small React + AG Grid ops console — a live grid of every
@@ -306,9 +347,10 @@ every REST endpoint is gated behind [API-key auth](#security),
 [Observability](#observability) gives Prometheus metrics and Kafka-spanning
 distributed traces across the whole saga, every Kafka listener now retries
 transient failures with exponential backoff before falling back to Kafka
-redelivery (see [Resilience](#resilience)), and [Load testing](#load-testing)
+redelivery (see [Resilience](#resilience)), [Load testing](#load-testing)
 gives k6 scripts to turn the design doc's capacity estimate into a measured
-number.
+number, and funds-auth-service now cache-asides account balance in Redis
+behind a circuit breaker (see [Caching](#caching)).
 
 **Also on the roadmap** — the difference between a demo and something that
 reads as production-grade:
@@ -319,7 +361,7 @@ reads as production-grade:
 - **CQRS read model** — the design doc names this but it was never built: today the dashboard's read APIs (`GET /api/sagas`, `GET /api/ledger/{id}`, `GET /api/notifications/{id}`) each query their own service's primary write-side table directly, not a separate projection. A real CQRS read model would be a dedicated service subscribing to `payment.events`/`payment.commands`, building a denormalized table purpose-shaped for the dashboard's queries, asynchronously consistent with — and decoupled from — the write-side services' own transactional stores
 - **Event sourcing** — not used, and today's state model is the opposite of it: `PaymentSagaState.advanceTo()` and `Account.debit()`/`credit()` mutate a current-value column in place (`state`, `balanceCents`), guarded by `@Version` optimistic locking, rather than deriving state by folding over a persisted, replayable event log. Kafka's `payment.events`/`payment.commands` carry facts *between* services but aren't retained/replayable as each service's system of record — a service restarting with an empty database couldn't rebuild its state from them. Actually event-sourcing an aggregate (most naturally the saga state machine) would mean storing every state transition as an immutable event and computing `state` as a projection over them on read, rather than persisting `state` itself
 - **API gateway** — mentioned in passing under [Dashboard](#dashboard) but never actually built. Would consolidate three things currently duplicated or missing: **authentication** (`ApiKeyAuthFilter` registration is copy-pasted across 4 services' own `SecurityConfig` — `payment-api`, `saga-orchestrator`, `ledger-service`, `notification-service` — instead of enforced in one place), **routing** (clients currently have to know each service's own port and call it directly, e.g. the dashboard hitting `:8082`, `:8085`, `:8087` individually, instead of one host with path-based routing), and **rate limiting** (nothing today throttles `payment-api`'s client-facing `POST /payments`, or any endpoint, per key or client — see the rate-limiting gap noted above). CORS falls out of the same consolidation for free: `@CrossOrigin(origins = {"http://localhost:5173", "http://localhost:4173"})` is currently duplicated verbatim on 3 controllers rather than configured once at the edge
-- **ML fraud-risk scorer as a new `FraudRule`** — `fraud-service`'s `FraudRuleEngine` already uses Strategy (`HighValueThresholdRule`, `PositiveAmountRule`); add a rule that calls a small classifier (trained on synthetic transaction features: amount, velocity, account age) for a risk score alongside the existing deterministic rules. The interesting part: wrap the call in Resilience4j's `@CircuitBreaker` (already a dependency via `resilience4j-spring-boot3`, currently unused — only `@Retry` is configured) so a down/slow ML service degrades to the existing rules instead of blocking the saga. Keeps the core fraud decision path deterministic and testable; the ML piece is additive, not load-bearing
+- **ML fraud-risk scorer as a new `FraudRule`** — `fraud-service`'s `FraudRuleEngine` already uses Strategy (`HighValueThresholdRule`, `PositiveAmountRule`); add a rule that calls a small classifier (trained on synthetic transaction features: amount, velocity, account age) for a risk score alongside the existing deterministic rules. The interesting part: wrap the call in Resilience4j's `@CircuitBreaker` (the same `resilience4j-spring-boot3` dependency, now also used by [Caching](#caching)'s Redis lookup) so a down/slow ML service degrades to the existing rules instead of blocking the saga. Keeps the core fraud decision path deterministic and testable; the ML piece is additive, not load-bearing
 
 ## Ideas under discussion
 
@@ -497,4 +539,4 @@ docker exec payflow-postgres psql -U payflow -d notification \
 
 Java 21 · Spring Boot 3.3.4 · Maven (multi-module) · PostgreSQL 16 · Flyway ·
 Apache Kafka 3.7 (KRaft) · Kafka UI · Docker Compose · Hibernate / Spring Data JPA ·
-Micrometer / Prometheus · OpenTelemetry / Zipkin · Resilience4j · k6
+Micrometer / Prometheus · OpenTelemetry / Zipkin · Resilience4j · k6 · Redis

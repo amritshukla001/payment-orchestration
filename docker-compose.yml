@@ -66,6 +66,14 @@ services:
     ports:
       - "9411:9411"
 
+  redis:
+    image: redis:7-alpine
+    container_name: payflow-redis
+    ports:
+      - "6379:6379"
+    # No volume -- a pure cache-aside layer, safe to lose on restart;
+    # funds-auth-service falls back to Postgres on every miss.
+
 volumes:
   pgdata:
   kafkadata:
