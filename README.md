@@ -147,8 +147,9 @@ balance restored to its exact starting value, the funds reservation marked
 
 **Classic OOP / LLD (Gang of Four)**
 - **Strategy** — fraud-service's `FraudRule` interface, with
-  `HighValueThresholdRule` and `PositiveAmountRule` as independent
-  `@Component` beans Spring autowires into the engine's rule list.
+  `HighValueThresholdRule`, `PositiveAmountRule`, and `MlRiskScoreRule` as
+  independent `@Component` beans Spring autowires into the engine's rule
+  list, ordered via `@Order` (see [ML Fraud Risk Scorer](#ml-fraud-risk-scorer)).
 - **Mediator** — the saga orchestrator: fraud-service and funds-auth-service
   never call each other directly, only the orchestrator.
 - **Command** — `CheckFraudCommand`, `AuthorizeFundsCommand`, etc. are
@@ -333,6 +334,51 @@ and the backend ports on a local machine, so removing per-service auth
 would be a real regression, not just redundancy. The gateway is a first
 checkpoint, not a replacement for the others.
 
+## ML Fraud Risk Scorer
+
+`fraud-service`'s `FraudRuleEngine` (Strategy — see
+[Concepts & patterns demonstrated](#concepts--patterns-demonstrated)) gets
+a fourth rule, `MlRiskScoreRule`, alongside the existing
+`PositiveAmountRule`/`HighValueThresholdRule`. It scores every payment with
+a hand-trained logistic regression on three features — `amount`, `velocity`
+(the payer's check count in the last 24h), and `deviation` (how far this
+amount is from the payer's own recent average) — and rejects above a
+configured threshold. **This is a toy classifier, explicitly not a
+production model**: no training framework, no real labeled fraud data.
+`FraudModelTrainer` (`fraud-service/src/test/java/.../ml/`, not part of
+the running service) generates synthetic transactions against a documented
+ground-truth rule and trains via plain gradient descent — pure Java, no ML
+library — and its output is hand-pasted into `application.yml`'s
+`fraud.ml-scorer.weights` once, offline. The point is the integration
+pattern, not the model.
+
+Velocity and deviation come from a new `fraud_check_history` table,
+populated by `FraudCommandListener` on every check. This is deliberately
+*not* a call to funds-auth-service for real account age — that service is
+Kafka-only by design, and a new synchronous REST dependency would be a
+bigger architectural change than this feature warrants (see
+[Ideas under discussion](#ideas-under-discussion) for the event-driven
+alternative). One honest limitation this creates: a brand-new payer always
+scores `velocity=0, deviation=0` (nothing to compare against yet), so the
+ML rule can never flag a first-time payer's amount alone — exactly why it's
+ordered *after* the two deterministic rules (`@Order(1)`/`@Order(2)`/
+`@Order(3)` on the three rules), not instead of them.
+
+`MockMlFraudScorer.score()` — not `MlRiskScoreRule` itself — carries the
+`@CircuitBreaker(name = "ml-fraud-scorer")`. That placement is deliberate,
+not incidental: Spring's AOP proxy only intercepts calls arriving from
+*outside* a bean, so an annotated method can never trigger its own fallback
+via self-invocation (calling it through `this` from another method on the
+same class) — confirmed the hard way, by building it the other way first
+and watching the fallback silently never fire under a live simulated
+outage. Putting the annotation on `MockMlFraudScorer`, a separate bean
+called externally by `MlRiskScoreRule`, is what makes the proxy actually
+apply. Verified live: forcing `fraud.ml-scorer.simulated-failure-rate` to
+`1.0` and sending the same anomalous payment that the ML rule rejects under
+normal operation, it now settles instead — the fallback returns a
+below-threshold score, so a down ML service degrades to the deterministic
+rules exactly as intended, never blocks the saga.
+
 ## Dashboard
 
 `dashboard/` is a small React + AG Grid ops console — a live grid of every
@@ -402,27 +448,31 @@ transient failures with exponential backoff before falling back to Kafka
 redelivery (see [Resilience](#resilience)), [Load testing](#load-testing)
 gives k6 scripts to turn the design doc's capacity estimate into a measured
 number, funds-auth-service now cache-asides account balance in Redis
-behind a circuit breaker (see [Caching](#caching)), and a Spring Cloud
+behind a circuit breaker (see [Caching](#caching)), a Spring Cloud
 Gateway edge service now fronts the four REST-exposing services with
 centralized routing, auth, rate limiting, and CORS (see
-[API Gateway](#api-gateway)).
+[API Gateway](#api-gateway)), payment-api now serves a live OpenAPI
+spec and Swagger UI (`/v3/api-docs`, `/swagger-ui/index.html`) generated
+straight from `PaymentController`, exempted from API-key auth the same
+way `/actuator` is so the docs themselves are publicly browsable, and
+fraud-service now has a fourth `FraudRule` backed by a small hand-trained
+classifier, circuit-breaker-guarded so a down ML service degrades to the
+deterministic rules instead of blocking the saga (see
+[ML Fraud Risk Scorer](#ml-fraud-risk-scorer)).
 
 **Also on the roadmap** — the difference between a demo and something that
 reads as production-grade:
-- **API documentation** — OpenAPI/Swagger on payment-api
 - **Containerization** — a Dockerfile per service + a compose file that builds from source, so running this doesn't require a local Java/Maven install
 - **Architecture Decision Records** — short docs on why Kafka over Pulsar, why orchestration over choreography
 - **Schema evolution discipline** — every future schema change ships as a new Flyway migration, never editing one already applied
 - **CQRS read model** — the design doc names this but it was never built: today the dashboard's read APIs (`GET /api/sagas`, `GET /api/ledger/{id}`, `GET /api/notifications/{id}`) each query their own service's primary write-side table directly, not a separate projection. A real CQRS read model would be a dedicated service subscribing to `payment.events`/`payment.commands`, building a denormalized table purpose-shaped for the dashboard's queries, asynchronously consistent with — and decoupled from — the write-side services' own transactional stores
 - **Event sourcing** — not used, and today's state model is the opposite of it: `PaymentSagaState.advanceTo()` and `Account.debit()`/`credit()` mutate a current-value column in place (`state`, `balanceCents`), guarded by `@Version` optimistic locking, rather than deriving state by folding over a persisted, replayable event log. Kafka's `payment.events`/`payment.commands` carry facts *between* services but aren't retained/replayable as each service's system of record — a service restarting with an empty database couldn't rebuild its state from them. Actually event-sourcing an aggregate (most naturally the saga state machine) would mean storing every state transition as an immutable event and computing `state` as a projection over them on read, rather than persisting `state` itself
-- **ML fraud-risk scorer as a new `FraudRule`** — `fraud-service`'s `FraudRuleEngine` already uses Strategy (`HighValueThresholdRule`, `PositiveAmountRule`); add a rule that calls a small classifier (trained on synthetic transaction features: amount, velocity, account age) for a risk score alongside the existing deterministic rules. The interesting part: wrap the call in Resilience4j's `@CircuitBreaker` (the same `resilience4j-spring-boot3` dependency, now also used by [Caching](#caching)'s Redis lookup) so a down/slow ML service degrades to the existing rules instead of blocking the saga. Keeps the core fraud decision path deterministic and testable; the ML piece is additive, not load-bearing
 
 ## Ideas under discussion
 
 Rougher than the roadmap above — directions being considered, not committed to:
 
-- **ML fraud-risk scorer** — see the roadmap entry above; this is the one furthest along in thinking.
-- **Velocity/behavioral anomaly detection** — real fraud systems lean on behavior, not static thresholds ("5 payments from this account in 2 minutes," "10x this account's usual amount"). Needs a rolling window of recent transactions per account — could double as infrastructure for the CQRS read model above, one feature store serving both the dashboard and fraud features. More genuinely fraud-domain than a one-shot classifier, more build effort.
+- **Real velocity/behavioral features via a cross-service event** — the [ML Fraud Risk Scorer](#ml-fraud-risk-scorer)'s velocity/deviation features are computed from fraud-service's own local history, deliberately avoiding a synchronous call to funds-auth-service (which is Kafka-only by design). A fuller version would have funds-auth-service publish account-lifecycle events and let fraud-service build a local read model from them — more consistent with this project's event-driven style than adding a new synchronous REST call — could also double as infrastructure for the CQRS read model above, one feature store serving both the dashboard and fraud features.
 - **LLM-generated fraud explanations, not decisions** — when fraud-service rejects a payment, turn the triggering rule + context into a human-readable reason for the notification/audit trail via an LLM call. Keeps the actual fraud call deterministic (ML/rules decide, LLM explains) — a real production pattern, and a clean small addition to notification-service once the ML scorer above exists to explain.
 - **AI-assisted compensation summaries** — same idea applied to the compensation path: when a payment lands on `COMPENSATED`, generate a plain-English incident summary from the saga timeline. Reuses the existing `/payments/{id}/timeline` endpoint.
 
@@ -521,6 +571,8 @@ cd dashboard && npm install && npm run dev     # http://localhost:5173
 Kafka UI is at http://localhost:8081 for browsing topics/messages directly.
 Prometheus is at http://localhost:9090 (metrics/targets), Zipkin is at
 http://localhost:9411 (traces) — see [Observability](#observability).
+payment-api's interactive API docs are at
+http://localhost:8080/swagger-ui/index.html.
 
 ### Try it
 
@@ -604,7 +656,7 @@ docker exec payflow-postgres psql -U payflow -d notification \
 
 ## Tech stack
 
-Java 21 · Spring Boot 3.3.4 · Maven (multi-module) · PostgreSQL 16 · Flyway ·
+Java 21 · Spring Boot 3.3.13 · Maven (multi-module) · PostgreSQL 16 · Flyway ·
 Apache Kafka 3.7 (KRaft) · Kafka UI · Docker Compose · Hibernate / Spring Data JPA ·
 Micrometer / Prometheus · OpenTelemetry / Zipkin · Resilience4j · k6 · Redis ·
-Spring Cloud Gateway
+Spring Cloud Gateway · springdoc-openapi / Swagger UI

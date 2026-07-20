@@ -42,3 +42,24 @@ resilience4j:
         wait-duration: 200ms
         enable-exponential-backoff: true
         exponential-backoff-multiplier: 2
+  circuitbreaker:
+    instances:
+      ml-fraud-scorer:
+        sliding-window-size: 10
+        failure-rate-threshold: 50
+        wait-duration-in-open-state: 5s
+        permitted-number-of-calls-in-half-open-state: 3
+
+fraud:
+  ml-scorer:
+    # Weights trained offline against synthetic data by FraudModelTrainer
+    # (fraud-service/src/test/java/.../ml/FraudModelTrainer.java) -- a
+    # hand-trained toy logistic regression, not a production model.
+    weights:
+      amount: 0.9193382807494945
+      velocity: 0.9930392765060324
+      deviation: 2.53330119164231
+      bias: -2.4184935869917052
+    threshold: 0.75
+    simulated-latency-ms: 150
+    simulated-failure-rate: 0.0

@@ -6,7 +6,9 @@ import com.payflow.common.events.EventEnvelope;
 import com.payflow.common.events.FraudApprovedEvent;
 import com.payflow.common.events.FraudRejectedEvent;
 import com.payflow.common.events.PaymentEventType;
+import com.payflow.fraudservice.domain.FraudCheckHistory;
 import com.payflow.fraudservice.domain.ProcessedEvent;
+import com.payflow.fraudservice.repository.FraudCheckHistoryRepository;
 import com.payflow.fraudservice.repository.ProcessedEventRepository;
 import com.payflow.fraudservice.rules.FraudRuleEngine;
 import com.payflow.fraudservice.rules.Verdict;
@@ -30,15 +32,18 @@ public class FraudCommandListener {
     private static final String EVENTS_TOPIC = "payment.events";
 
     private final ProcessedEventRepository processedEventRepository;
+    private final FraudCheckHistoryRepository fraudCheckHistoryRepository;
     private final FraudRuleEngine ruleEngine;
     private final KafkaTemplate<String, String> kafkaTemplate;
     private final ObjectMapper objectMapper;
 
     public FraudCommandListener(ProcessedEventRepository processedEventRepository,
+                                 FraudCheckHistoryRepository fraudCheckHistoryRepository,
                                  FraudRuleEngine ruleEngine,
                                  KafkaTemplate<String, String> kafkaTemplate,
                                  ObjectMapper objectMapper) {
         this.processedEventRepository = processedEventRepository;
+        this.fraudCheckHistoryRepository = fraudCheckHistoryRepository;
         this.ruleEngine = ruleEngine;
         this.kafkaTemplate = kafkaTemplate;
         this.objectMapper = objectMapper;
@@ -74,6 +79,11 @@ public class FraudCommandListener {
         }
 
         processedEventRepository.save(new ProcessedEvent(envelope.eventId(), Instant.now()));
+        // Saved after evaluation, not before -- a check's own amount shouldn't
+        // count toward the velocity/deviation baseline MlRiskScoreRule computes
+        // for that same check.
+        fraudCheckHistoryRepository.save(new FraudCheckHistory(UUID.randomUUID(), command.paymentId(),
+                command.payerAccount(), command.amountCents(), Instant.now()));
         ack.acknowledge();
     }
 

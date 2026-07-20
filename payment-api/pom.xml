@@ -34,6 +34,20 @@
       <groupId>org.springframework.boot</groupId>
       <artifactId>spring-boot-starter-validation</artifactId>
     </dependency>
+    <!-- Spring Boot's own BOM doesn't manage springdoc, same reasoning
+         as Resilience4j and Spring Cloud (a third-party project with its
+         own release cadence), hence the explicit version. -->
+    <dependency>
+      <groupId>org.springdoc</groupId>
+      <artifactId>springdoc-openapi-starter-webmvc-ui</artifactId>
+      <!-- 2.6.0, not the newer 2.7.x/2.8.x line: those pull in a
+           webjars-locator-lite class (LiteWebJarsResourceResolver) that
+           only exists in Spring Framework 6.2+ (Boot 3.4+); this project
+           is pinned to Boot 3.3.13 / Spring Framework 6.1.21, confirmed
+           by a NoClassDefFoundError at startup with 2.8.6 before this
+           pin, same category of issue as the api-gateway Boot bump. -->
+      <version>2.6.0</version>
+    </dependency>
     <dependency>
       <groupId>org.springframework.boot</groupId>
       <artifactId>spring-boot-starter-actuator</artifactId>
