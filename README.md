@@ -379,6 +379,77 @@ normal operation, it now settles instead — the fallback returns a
 below-threshold score, so a down ML service degrades to the deterministic
 rules exactly as intended, never blocks the saga.
 
+## Containerization
+
+Every one of the 8 Spring Boot modules — `payment-api`, `saga-orchestrator`,
+`fraud-service`, `funds-auth-service`, `ledger-service`, `settlement-service`,
+`notification-service`, `api-gateway` — has its own `Dockerfile`, each a
+two-stage build: `maven:3.9-eclipse-temurin-21` compiles the jar (there's no
+Maven wrapper in this repo, so the build stage needs the image's own Maven),
+then a slim `eclipse-temurin:21-jre-alpine` runtime stage just copies it in.
+`docker-compose.yml` builds and runs all 8 alongside the existing infra, so
+`docker compose up --build` is now a complete alternative to running
+`mvn spring-boot:run` per service — see
+[Running it locally](#running-it-locally) for both. The `mvn spring-boot:run`
+workflow isn't going away; it's still the faster loop for active
+development, this is just a second way to run the whole thing with nothing
+but Docker installed.
+
+Each service's build context is the **repo root**, not its own directory:
+`common` (the shared library every service depends on) has no published
+artifact, so it has to be compiled from source as part of the same Maven
+reactor build as the service itself. All 9 modules' `pom.xml` files get
+copied and `dependency:go-offline` run before any `src/` is copied in — the
+standard Docker/Maven layer-caching trick, so a rebuild after a source-only
+change doesn't re-download the world. This was a genuine early failure
+worth calling out: Maven's reactor won't even parse if the root `pom.xml`'s
+declared `<modules>` list references directories that don't exist yet in
+the build context — copying just `common`'s and the target service's
+`pom.xml` isn't enough; **every** module's `pom.xml` has to be present, even
+ones this particular image never builds.
+
+Two networking changes were needed to make containers reachable from each
+other, both because the existing setup was built assuming every service ran
+on the host, talking to infra over `localhost`:
+
+- **Kafka needed a second listener.** The existing setup only advertises
+  `PLAINTEXT://localhost:9092` — fine for a host process, but a client
+  bootstrapping from *inside* the compose network gets redirected to that
+  same `localhost:9092` post-connect and fails. Added
+  `INTERNAL://kafka:29092` alongside it; containerized services use the
+  internal one, anything still run via `mvn spring-boot:run` keeps using
+  `localhost:9092` unchanged.
+- **Each service gets an `application-docker.yml`**, a new Spring profile
+  (`SPRING_PROFILES_ACTIVE=docker`, set in `docker-compose.yml`, not baked
+  into the image) overriding just the datasource URL, Kafka bootstrap
+  servers, and Zipkin endpoint to use container hostnames (`postgres`,
+  `kafka`, `zipkin`) instead of `localhost`. The base `application.yml` is
+  untouched, so `mvn spring-boot:run` behaves exactly as before.
+  `api-gateway`'s version is the one exception worth a callout: its route
+  table is a YAML list, and Spring's environment-variable override syntax
+  for list elements is index-fragile, so its `application-docker.yml`
+  re-declares the whole route table with container hostnames rather than
+  overriding individual URIs.
+
+`docker/prometheus/prometheus.yml` lists both the host address
+(`host.docker.internal:PORT`) and the container address (`<service>:PORT`)
+for every job — whichever workflow is actually running shows "up" in
+Prometheus's `/targets`, the other harmlessly shows "down," so switching
+between `mvn spring-boot:run` and `docker compose up` never means editing
+monitoring config.
+
+Verified live end to end: built and started all 8 containers alongside the
+existing infra, sent a real payment through the containerized gateway
+(`:8088`), and watched it cross every container boundary — payment-api's
+Kafka command through saga-orchestrator, fraud-service, funds-auth-service
+(Postgres *and* Redis), ledger-service, and settlement-service — to reach
+`SETTLED`, the same as the host-run version.
+
+Explicitly out of scope: `dashboard/` isn't containerized here — it's a
+Vite/React dev app with no production build/serving setup today, a Node
+tooling concern separate from what this item was actually about (not
+needing a local Java/Maven install).
+
 ## Dashboard
 
 `dashboard/` is a small React + AG Grid ops console — a live grid of every
@@ -458,11 +529,12 @@ way `/actuator` is so the docs themselves are publicly browsable, and
 fraud-service now has a fourth `FraudRule` backed by a small hand-trained
 classifier, circuit-breaker-guarded so a down ML service degrades to the
 deterministic rules instead of blocking the saga (see
-[ML Fraud Risk Scorer](#ml-fraud-risk-scorer)).
+[ML Fraud Risk Scorer](#ml-fraud-risk-scorer)), and every service now has
+its own Dockerfile, so the whole stack runs via `docker compose up --build`
+with nothing but Docker installed (see [Containerization](#containerization)).
 
 **Also on the roadmap** — the difference between a demo and something that
 reads as production-grade:
-- **Containerization** — a Dockerfile per service + a compose file that builds from source, so running this doesn't require a local Java/Maven install
 - **Architecture Decision Records** — short docs on why Kafka over Pulsar, why orchestration over choreography
 - **Schema evolution discipline** — every future schema change ships as a new Flyway migration, never editing one already applied
 - **CQRS read model** — the design doc names this but it was never built: today the dashboard's read APIs (`GET /api/sagas`, `GET /api/ledger/{id}`, `GET /api/notifications/{id}`) each query their own service's primary write-side table directly, not a separate projection. A real CQRS read model would be a dedicated service subscribing to `payment.events`/`payment.commands`, building a denormalized table purpose-shaped for the dashboard's queries, asynchronously consistent with — and decoupled from — the write-side services' own transactional stores
@@ -545,7 +617,10 @@ suite `mvn verify` already runs on every push.
 
 ## Running it locally
 
-Requires Docker Desktop and Java 21 + Maven.
+Two ways to run this — pick one.
+
+**Option A: host processes (faster loop for active development).** Requires
+Docker Desktop and Java 21 + Maven.
 
 ```bash
 # 1. Start infra (Postgres, Kafka, Kafka UI)
@@ -568,9 +643,23 @@ cd api-gateway && mvn spring-boot:run          # :8088
 cd dashboard && npm install && npm run dev     # http://localhost:5173
 ```
 
-Kafka UI is at http://localhost:8081 for browsing topics/messages directly.
-Prometheus is at http://localhost:9090 (metrics/targets), Zipkin is at
-http://localhost:9411 (traces) — see [Observability](#observability).
+**Option B: everything in Docker** (see [Containerization](#containerization)) —
+requires only Docker Desktop, no local Java/Maven install:
+
+```bash
+docker compose --profile docker up --build
+```
+
+Builds and starts infra plus all 8 services from source. Same ports as
+Option A (`:8080`, `:8082`–`:8088`), so the dashboard and any curl testing
+below work identically either way. `--profile docker` is required — a plain
+`docker compose up -d` (as used in Option A's step 1) intentionally starts
+infra only, so it doesn't unexpectedly try to build and start all 8 services
+too.
+
+Either way: Kafka UI is at http://localhost:8081 for browsing topics/messages
+directly. Prometheus is at http://localhost:9090 (metrics/targets), Zipkin is
+at http://localhost:9411 (traces) — see [Observability](#observability).
 payment-api's interactive API docs are at
 http://localhost:8080/swagger-ui/index.html.
 

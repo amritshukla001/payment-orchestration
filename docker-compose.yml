@@ -25,16 +25,27 @@ services:
     environment:
       KAFKA_NODE_ID: 1
       KAFKA_PROCESS_ROLES: broker,controller
-      KAFKA_LISTENERS: PLAINTEXT://:9092,CONTROLLER://:9093
-      KAFKA_ADVERTISED_LISTENERS: PLAINTEXT://localhost:9092
+      # INTERNAL, on top of the original PLAINTEXT/localhost listener --
+      # a client bootstrapping from *inside* the compose network gets
+      # redirected to whatever's in KAFKA_ADVERTISED_LISTENERS, so without
+      # this, containerized services would be handed back "localhost:9092"
+      # and fail to actually connect. Host-run services (`mvn spring-boot:run`)
+      # keep using PLAINTEXT://localhost:9092 unchanged.
+      KAFKA_LISTENERS: PLAINTEXT://:9092,INTERNAL://:29092,CONTROLLER://:9093
+      KAFKA_ADVERTISED_LISTENERS: PLAINTEXT://localhost:9092,INTERNAL://kafka:29092
       KAFKA_CONTROLLER_LISTENER_NAMES: CONTROLLER
       KAFKA_CONTROLLER_QUORUM_VOTERS: 1@kafka:9093
-      KAFKA_LISTENER_SECURITY_PROTOCOL_MAP: CONTROLLER:PLAINTEXT,PLAINTEXT:PLAINTEXT
+      KAFKA_LISTENER_SECURITY_PROTOCOL_MAP: CONTROLLER:PLAINTEXT,PLAINTEXT:PLAINTEXT,INTERNAL:PLAINTEXT
       KAFKA_INTER_BROKER_LISTENER_NAME: PLAINTEXT
       KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: 1
       CLUSTER_ID: 4L6g3nShT-eMCtK--X86sw
     volumes:
       - kafkadata:/var/lib/kafka/data
+    healthcheck:
+      test: ["CMD-SHELL", "/opt/kafka/bin/kafka-broker-api-versions.sh --bootstrap-server localhost:9092"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
 
   kafka-ui:
     image: provectuslabs/kafka-ui:latest
@@ -43,7 +54,7 @@ services:
       - "8081:8080"
     environment:
       KAFKA_CLUSTERS_0_NAME: local
-      KAFKA_CLUSTERS_0_BOOTSTRAPSERVERS: kafka:9092
+      KAFKA_CLUSTERS_0_BOOTSTRAPSERVERS: kafka:29092
     depends_on:
       - kafka
 
@@ -55,8 +66,10 @@ services:
     volumes:
       - ./docker/prometheus/prometheus.yml:/etc/prometheus/prometheus.yml
       - promdata:/prometheus
-    # Services run on the host via `mvn spring-boot:run`, not in this compose
-    # network, so Prometheus scrapes them through host.docker.internal.
+    # Services can run on the host via `mvn spring-boot:run` (reachable
+    # through host.docker.internal) or as containers on this network
+    # (reachable by service name) -- prometheus.yml lists both targets per
+    # job so either workflow scrapes correctly without editing config.
     extra_hosts:
       - "host.docker.internal:host-gateway"
 
@@ -73,6 +86,142 @@ services:
       - "6379:6379"
     # No volume -- a pure cache-aside layer, safe to lose on restart;
     # funds-auth-service falls back to Postgres on every miss.
+
+  # --- Application services -------------------------------------------
+  # Gated behind the "docker" Compose profile so a plain `docker compose up
+  # -d` (today's "start infra only" step) doesn't also try to build and
+  # start all 8 of these -- they only come up with `--profile docker`
+  # (see Running it locally). Also runnable via `mvn spring-boot:run` per
+  # service on the host, which stays the faster loop for active development;
+  # this is an additional way to run the whole stack, not a replacement.
+
+  payment-api:
+    profiles: ["docker"]
+    build:
+      context: .
+      dockerfile: payment-api/Dockerfile
+    container_name: payflow-payment-api
+    ports:
+      - "8080:8080"
+    environment:
+      SPRING_PROFILES_ACTIVE: docker
+    depends_on:
+      postgres:
+        condition: service_healthy
+      kafka:
+        condition: service_healthy
+
+  saga-orchestrator:
+    profiles: ["docker"]
+    build:
+      context: .
+      dockerfile: saga-orchestrator/Dockerfile
+    container_name: payflow-saga-orchestrator
+    ports:
+      - "8082:8082"
+    environment:
+      SPRING_PROFILES_ACTIVE: docker
+    depends_on:
+      postgres:
+        condition: service_healthy
+      kafka:
+        condition: service_healthy
+
+  fraud-service:
+    profiles: ["docker"]
+    build:
+      context: .
+      dockerfile: fraud-service/Dockerfile
+    container_name: payflow-fraud-service
+    ports:
+      - "8083:8083"
+    environment:
+      SPRING_PROFILES_ACTIVE: docker
+    depends_on:
+      postgres:
+        condition: service_healthy
+      kafka:
+        condition: service_healthy
+
+  funds-auth-service:
+    profiles: ["docker"]
+    build:
+      context: .
+      dockerfile: funds-auth-service/Dockerfile
+    container_name: payflow-funds-auth-service
+    ports:
+      - "8084:8084"
+    environment:
+      SPRING_PROFILES_ACTIVE: docker
+    depends_on:
+      postgres:
+        condition: service_healthy
+      kafka:
+        condition: service_healthy
+      redis:
+        condition: service_started
+
+  ledger-service:
+    profiles: ["docker"]
+    build:
+      context: .
+      dockerfile: ledger-service/Dockerfile
+    container_name: payflow-ledger-service
+    ports:
+      - "8085:8085"
+    environment:
+      SPRING_PROFILES_ACTIVE: docker
+    depends_on:
+      postgres:
+        condition: service_healthy
+      kafka:
+        condition: service_healthy
+
+  settlement-service:
+    profiles: ["docker"]
+    build:
+      context: .
+      dockerfile: settlement-service/Dockerfile
+    container_name: payflow-settlement-service
+    ports:
+      - "8086:8086"
+    environment:
+      SPRING_PROFILES_ACTIVE: docker
+    depends_on:
+      postgres:
+        condition: service_healthy
+      kafka:
+        condition: service_healthy
+
+  notification-service:
+    profiles: ["docker"]
+    build:
+      context: .
+      dockerfile: notification-service/Dockerfile
+    container_name: payflow-notification-service
+    ports:
+      - "8087:8087"
+    environment:
+      SPRING_PROFILES_ACTIVE: docker
+    depends_on:
+      postgres:
+        condition: service_healthy
+      kafka:
+        condition: service_healthy
+
+  api-gateway:
+    profiles: ["docker"]
+    build:
+      context: .
+      dockerfile: api-gateway/Dockerfile
+    container_name: payflow-api-gateway
+    ports:
+      - "8088:8088"
+    environment:
+      SPRING_PROFILES_ACTIVE: docker
+    depends_on:
+      redis:
+        condition: service_started
 
 volumes:
   pgdata:

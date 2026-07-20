@@ -1,0 +1,14 @@
+# Activated via SPRING_PROFILES_ACTIVE=docker (set in docker-compose.yml)
+# when this service runs as a container instead of `mvn spring-boot:run` on
+# the host -- overrides just the properties that need a container hostname
+# in place of localhost. application.yml itself is untouched.
+spring:
+  datasource:
+    url: jdbc:postgresql://postgres:5432/orchestrator
+  kafka:
+    bootstrap-servers: kafka:29092
+
+management:
+  zipkin:
+    tracing:
+      endpoint: http://zipkin:9411/api/v2/spans

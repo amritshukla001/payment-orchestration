@@ -1,0 +1,48 @@
+# Activated via SPRING_PROFILES_ACTIVE=docker (set in docker-compose.yml)
+# when this service runs as a container instead of `mvn spring-boot:run` on
+# the host. Spring Boot's YAML list properties don't merge element-wise
+# across profile documents -- a routes list defined here fully replaces the
+# base application.yml's, so the whole route table (not just the changed
+# uris) is re-declared with container hostnames instead of localhost.
+# globalcors.allowedOrigins is deliberately left out of this file (falls
+# back to the base document): that's the browser's origin, unrelated to
+# which network the gateway container itself runs on.
+spring:
+  data:
+    redis:
+      host: redis
+  cloud:
+    gateway:
+      routes:
+        - id: payment-api-create
+          uri: http://payment-api:8080
+          predicates:
+            - Path=/payments
+            - Method=POST
+          filters:
+            - name: RequestRateLimiter
+              args:
+                redis-rate-limiter.replenishRate: 20
+                redis-rate-limiter.burstCapacity: 40
+                key-resolver: "#{@apiKeyResolver}"
+        - id: payment-api-reads
+          uri: http://payment-api:8080
+          predicates:
+            - Path=/payments/**
+        - id: saga-orchestrator
+          uri: http://saga-orchestrator:8082
+          predicates:
+            - Path=/api/sagas/**
+        - id: ledger-service
+          uri: http://ledger-service:8085
+          predicates:
+            - Path=/api/ledger/**
+        - id: notification-service
+          uri: http://notification-service:8087
+          predicates:
+            - Path=/api/notifications/**
+
+management:
+  zipkin:
+    tracing:
+      endpoint: http://zipkin:9411/api/v2/spans
