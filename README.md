@@ -127,6 +127,46 @@ ledger's HOLD and REVERSAL entries exactly offsetting, the payer's account
 balance restored to its exact starting value, the funds reservation marked
 `RELEASED`, and no `settlements` row ever created.
 
+## Event Sourcing
+
+The saga aggregate used to be the opposite of event-sourced:
+`PaymentSagaState.advanceTo()` mutated a current-value `state` column in
+place (`payment_saga_state`, guarded by `@Version` optimistic locking).
+Kafka's `payment.events` carries facts *between* services but was never
+retained/replayable as saga-orchestrator's own system of record — a
+restart with an empty database couldn't have rebuilt `state` from it.
+
+Now `payment_saga_events` is the actual system of record: one immutable
+row per transition (`sequence_number, event_type, to_state, occurred_at`),
+never updated or deleted — the same append-only discipline
+`ledger-service`'s `ledger_entries` already uses. `payer_account`,
+`payee_account`, `amount_cents`, and `currency` are only ever populated on
+the `sequence_number = 0` (`PAYMENT_INITIATED`) row, since nothing else
+about a payment changes after that. `PaymentSagaAggregate` — the same
+shape `PaymentSagaState` used to be — is no longer persisted at all; it's
+a disposable projection reconstructed by `PaymentSagaAggregate.replay()`,
+folding the ordered event log into "what's true right now." Every decision
+`PaymentEventListener` makes is unchanged — it's the exact same state
+machine — only *how* each resulting fact gets stored changed, from
+"mutate + save one row" to "append one new row."
+
+This is a full replay on every read (`SagaEventStore.load()`/`.loadAll()`),
+not a `DISTINCT ON`-style optimized query — a deliberate choice. This
+aggregate's own read path (`GET /api/sagas`) doesn't need to be the fast
+one; [read-model-service](#cqrs-read-model) already exists as the actual
+scalable, denormalized read path the dashboard uses. Event Sourcing on the
+write side and CQRS on the read side turn out to be a natural pair: one
+gives the aggregate a true, replayable history; the other gives reads a
+purpose-built, fast projection — neither needs to compromise for the
+other's concern.
+
+`@Version` optimistic locking is gone from this aggregate for the same
+reason it was mostly a formality before: Kafka's per-`paymentId`
+partition-key ordering already guarantees this listener never processes
+two events for the same payment concurrently. What replaces it is a
+`UNIQUE (payment_id, sequence_number)` constraint on `payment_saga_events`
+— a safety net against an accidental double-append, not a contended path.
+
 ## Concepts & patterns demonstrated
 
 **Distributed systems / HLD**
@@ -142,16 +182,24 @@ balance restored to its exact starting value, the funds reservation marked
   table before acting, since Kafka only guarantees at-least-once delivery.
 - **Database per service** — eight services, eight separate Postgres
   databases, no shared schema.
-- **Optimistic locking** — `@Version` on `Payment`, `PaymentSagaState`, and
-  `Account` guards concurrent writers without pessimistic locks.
+- **Optimistic locking** — `@Version` on `Payment` and `Account` guards
+  concurrent writers without pessimistic locks. `PaymentSagaAggregate` no
+  longer needs it (see [Event Sourcing](#event-sourcing) below) — an
+  append-only log has nothing to race over updating.
 - **Schema evolution via versioned migrations** — a real schema change
   (`payment_saga_state` gaining `payee_account`) shipped as a new Flyway
-  `V2` migration, never editing the applied `V1`.
+  `V2` migration, never editing the applied `V1`; `V3` later replaced that
+  whole table with an append-only event log (see
+  [Event Sourcing](#event-sourcing)), again as a new migration rather than
+  an edit to either prior one.
 - **Consistency tradeoffs** — strong (ACID) consistency within each
   service's own database, eventual consistency across the saga as a whole.
 - **CQRS** — [read-model-service](#cqrs-read-model) is a dedicated read side,
   projecting a denormalized view from `payment.events` rather than the
   dashboard querying each write-side service's own table directly.
+- **Event Sourcing** — the saga aggregate's `state` is no longer a
+  persisted column; it's derived by folding over an append-only
+  `payment_saga_events` log (see [Event Sourcing](#event-sourcing)).
 
 **Classic OOP / LLD (Gang of Four)**
 - **Strategy** — fraud-service's `FraudRule` interface, with
@@ -574,13 +622,17 @@ and a dedicated [CQRS Read Model](#cqrs-read-model) service now projects
 dashboard, decoupled from the three write-side services' tables it used to
 query directly — which required enriching the ledger events and adding a
 small producer to notification-service (previously consumer-only) so the
-projection has full detail to work with, not just `paymentId`s.
+projection has full detail to work with, not just `paymentId`s. The saga
+aggregate itself is now [event-sourced](#event-sourcing) too:
+`payment_saga_events` is an append-only log of every transition, and
+`state` is derived by folding over it on read rather than persisted as a
+mutable column — `PaymentSagaState` no longer exists.
 
 **Also on the roadmap** — the difference between a demo and something that
 reads as production-grade:
 - **Architecture Decision Records** — short docs on why Kafka over Pulsar, why orchestration over choreography
 - **Schema evolution discipline** — every future schema change ships as a new Flyway migration, never editing one already applied
-- **Event sourcing** — not used, and today's state model is the opposite of it: `PaymentSagaState.advanceTo()` and `Account.debit()`/`credit()` mutate a current-value column in place (`state`, `balanceCents`), guarded by `@Version` optimistic locking, rather than deriving state by folding over a persisted, replayable event log. Kafka's `payment.events`/`payment.commands` carry facts *between* services but aren't retained/replayable as each service's system of record — a service restarting with an empty database couldn't rebuild its state from them. Actually event-sourcing an aggregate (most naturally the saga state machine) would mean storing every state transition as an immutable event and computing `state` as a projection over them on read, rather than persisting `state` itself
+- **Event sourcing the rest of the way** — only the saga aggregate is event-sourced so far (see [Event Sourcing](#event-sourcing)); `Account.debit()`/`credit()` in funds-auth-service still mutates a current-value `balanceCents` column in place, guarded by `@Version` optimistic locking. The same log-and-fold approach would apply there too, just for a different aggregate.
 
 ## Ideas under discussion
 
@@ -757,11 +809,13 @@ curl -H "X-API-Key: local-dev-api-key-change-me" http://localhost:8080/payments/
 ```
 
 Check saga progress directly (or just watch it live in the
-[dashboard](#dashboard) instead):
+[dashboard](#dashboard) instead) — `state` isn't a column here, so this
+shows the full [event-sourced](#event-sourcing) transition log, not just
+the current value:
 
 ```bash
 docker exec payflow-postgres psql -U payflow -d orchestrator \
-  -c "SELECT payment_id, state FROM payment_saga_state;"
+  -c "SELECT payment_id, sequence_number, event_type, to_state FROM payment_saga_events ORDER BY payment_id, sequence_number;"
 ```
 
 Check both ledger legs (HOLD then FINAL):
@@ -787,7 +841,8 @@ docker exec payflow-postgres psql -U payflow -d notification \
 ```
 
 Check the [CQRS read model](#cqrs-read-model)'s own projection — should
-match `payment_saga_state` above once `read-model-service` catches up:
+match the folded state of the event log above once `read-model-service`
+catches up:
 
 ```bash
 docker exec payflow-postgres psql -U payflow -d readmodel \

@@ -17,9 +17,9 @@ import com.payflow.common.events.PaymentEventType;
 import com.payflow.common.events.PaymentFailedEvent;
 import com.payflow.common.events.PaymentInitiatedEvent;
 import com.payflow.common.events.SettlementDeclinedEvent;
-import com.payflow.orchestrator.domain.PaymentSagaState;
+import com.payflow.orchestrator.domain.PaymentSagaAggregate;
 import com.payflow.orchestrator.domain.ProcessedEvent;
-import com.payflow.orchestrator.repository.PaymentSagaStateRepository;
+import com.payflow.orchestrator.domain.SagaEventStore;
 import com.payflow.orchestrator.repository.ProcessedEventRepository;
 import io.github.resilience4j.retry.annotation.Retry;
 import org.apache.kafka.clients.consumer.ConsumerRecord;
@@ -46,16 +46,16 @@ public class PaymentEventListener {
     private static final String COMMANDS_TOPIC = "payment.commands";
     private static final String EVENTS_TOPIC = "payment.events";
 
-    private final PaymentSagaStateRepository sagaStateRepository;
+    private final SagaEventStore sagaEventStore;
     private final ProcessedEventRepository processedEventRepository;
     private final KafkaTemplate<String, String> kafkaTemplate;
     private final ObjectMapper objectMapper;
 
-    public PaymentEventListener(PaymentSagaStateRepository sagaStateRepository,
+    public PaymentEventListener(SagaEventStore sagaEventStore,
                                  ProcessedEventRepository processedEventRepository,
                                  KafkaTemplate<String, String> kafkaTemplate,
                                  ObjectMapper objectMapper) {
-        this.sagaStateRepository = sagaStateRepository;
+        this.sagaEventStore = sagaEventStore;
         this.processedEventRepository = processedEventRepository;
         this.kafkaTemplate = kafkaTemplate;
         this.objectMapper = objectMapper;
@@ -109,10 +109,8 @@ public class PaymentEventListener {
     private void onPaymentInitiated(EventEnvelope envelope) throws Exception {
         PaymentInitiatedEvent event = objectMapper.treeToValue(envelope.payload(), PaymentInitiatedEvent.class);
 
-        PaymentSagaState state = new PaymentSagaState(
-                event.paymentId(), event.payerAccount(), event.payeeAccount(), event.amountCents(), event.currency(),
-                PaymentState.INITIATED, Instant.now());
-        sagaStateRepository.save(state);
+        sagaEventStore.appendInitiated(event.paymentId(), event.payerAccount(), event.payeeAccount(),
+                event.amountCents(), event.currency(), Instant.now());
 
         CheckFraudCommand command = new CheckFraudCommand(
                 event.paymentId(), event.payerAccount(), event.amountCents(), event.currency(), Instant.now());
@@ -123,66 +121,63 @@ public class PaymentEventListener {
 
     private void onFraudApproved(EventEnvelope envelope) throws Exception {
         UUID paymentId = envelope.aggregateId();
-        PaymentSagaState state = sagaStateRepository.findById(paymentId).orElse(null);
-        if (state == null) {
+        PaymentSagaAggregate aggregate = sagaEventStore.load(paymentId).orElse(null);
+        if (aggregate == null) {
             log.warn("Received FRAUD_APPROVED for unknown payment {}", paymentId);
             return;
         }
 
-        state.advanceTo(PaymentState.FRAUD_CHECKED, Instant.now());
-        sagaStateRepository.save(state);
+        sagaEventStore.append(aggregate, "FRAUD_APPROVED", PaymentState.FRAUD_CHECKED, Instant.now());
 
         AuthorizeFundsCommand command = new AuthorizeFundsCommand(
-                paymentId, state.getPayerAccount(), state.getAmountCents(), state.getCurrency(), Instant.now());
+                paymentId, aggregate.getPayerAccount(), aggregate.getAmountCents(), aggregate.getCurrency(), Instant.now());
         publishCommand(paymentId, "AUTHORIZE_FUNDS", command);
         log.info("Payment {} FRAUD_CHECKED -> issued AUTHORIZE_FUNDS", paymentId);
     }
 
     private void onFraudRejected(EventEnvelope envelope) throws Exception {
         FraudRejectedEvent event = objectMapper.treeToValue(envelope.payload(), FraudRejectedEvent.class);
-        failSaga(event.paymentId(), event.reason(), "fraud rejected");
+        failSaga(event.paymentId(), "FRAUD_REJECTED", event.reason(), "fraud rejected");
     }
 
     private void onFundsAuthorized(EventEnvelope envelope) throws Exception {
         UUID paymentId = envelope.aggregateId();
-        PaymentSagaState state = sagaStateRepository.findById(paymentId).orElse(null);
-        if (state == null) {
+        PaymentSagaAggregate aggregate = sagaEventStore.load(paymentId).orElse(null);
+        if (aggregate == null) {
             log.warn("Received FUNDS_AUTHORIZED for unknown payment {}", paymentId);
             return;
         }
 
-        state.advanceTo(PaymentState.AUTHORIZED, Instant.now());
-        sagaStateRepository.save(state);
+        sagaEventStore.append(aggregate, "FUNDS_AUTHORIZED", PaymentState.AUTHORIZED, Instant.now());
 
         PostLedgerCommand command = new PostLedgerCommand(
-                paymentId, state.getPayerAccount(), state.getPayeeAccount(),
-                state.getAmountCents(), state.getCurrency(), Instant.now());
+                paymentId, aggregate.getPayerAccount(), aggregate.getPayeeAccount(),
+                aggregate.getAmountCents(), aggregate.getCurrency(), Instant.now());
         publishCommand(paymentId, "POST_LEDGER", command);
         log.info("Payment {} AUTHORIZED -> issued POST_LEDGER", paymentId);
     }
 
     private void onLedgerPosted(EventEnvelope envelope) throws Exception {
         UUID paymentId = envelope.aggregateId();
-        PaymentSagaState state = sagaStateRepository.findById(paymentId).orElse(null);
-        if (state == null) {
+        PaymentSagaAggregate aggregate = sagaEventStore.load(paymentId).orElse(null);
+        if (aggregate == null) {
             log.warn("Received LEDGER_POSTED for unknown payment {}", paymentId);
             return;
         }
 
-        state.advanceTo(PaymentState.LEDGER_POSTED, Instant.now());
-        sagaStateRepository.save(state);
+        sagaEventStore.append(aggregate, "LEDGER_POSTED", PaymentState.LEDGER_POSTED, Instant.now());
 
         SettleCommand command = new SettleCommand(
-                paymentId, state.getPayerAccount(), state.getPayeeAccount(),
-                state.getAmountCents(), state.getCurrency(), Instant.now());
+                paymentId, aggregate.getPayerAccount(), aggregate.getPayeeAccount(),
+                aggregate.getAmountCents(), aggregate.getCurrency(), Instant.now());
         publishCommand(paymentId, "SETTLE", command);
         log.info("Payment {} LEDGER_POSTED -> issued SETTLE", paymentId);
     }
 
     private void onPaymentSettled(EventEnvelope envelope) throws Exception {
         UUID paymentId = envelope.aggregateId();
-        PaymentSagaState state = sagaStateRepository.findById(paymentId).orElse(null);
-        if (state == null) {
+        PaymentSagaAggregate aggregate = sagaEventStore.load(paymentId).orElse(null);
+        if (aggregate == null) {
             log.warn("Received PAYMENT_SETTLED for unknown payment {}", paymentId);
             return;
         }
@@ -192,11 +187,10 @@ public class PaymentEventListener {
         // posting is bookkeeping that follows behind it, not a gate on
         // reaching this state -- mirrors how real settlement and ledger
         // close can lag each other slightly.
-        state.advanceTo(PaymentState.SETTLED, Instant.now());
-        sagaStateRepository.save(state);
+        sagaEventStore.append(aggregate, "PAYMENT_SETTLED", PaymentState.SETTLED, Instant.now());
 
         PostFinalLedgerCommand command = new PostFinalLedgerCommand(
-                paymentId, state.getPayeeAccount(), state.getAmountCents(), Instant.now());
+                paymentId, aggregate.getPayeeAccount(), aggregate.getAmountCents(), Instant.now());
         publishCommand(paymentId, "POST_FINAL_LEDGER", command);
         log.info("Payment {} SETTLED -> issued POST_FINAL_LEDGER", paymentId);
     }
@@ -209,7 +203,7 @@ public class PaymentEventListener {
     private void onFundsAuthorizationFailed(EventEnvelope envelope) throws Exception {
         FundsAuthorizationFailedEvent event =
                 objectMapper.treeToValue(envelope.payload(), FundsAuthorizationFailedEvent.class);
-        failSaga(event.paymentId(), event.reason(), "funds authorization rejected");
+        failSaga(event.paymentId(), "FUNDS_AUTHORIZATION_FAILED", event.reason(), "funds authorization rejected");
     }
 
     // --- compensation path -----------------------------------------------
@@ -222,26 +216,25 @@ public class PaymentEventListener {
 
     private void onSettlementDeclined(EventEnvelope envelope) throws Exception {
         SettlementDeclinedEvent event = objectMapper.treeToValue(envelope.payload(), SettlementDeclinedEvent.class);
-        PaymentSagaState state = sagaStateRepository.findById(event.paymentId()).orElse(null);
-        if (state == null) {
+        PaymentSagaAggregate aggregate = sagaEventStore.load(event.paymentId()).orElse(null);
+        if (aggregate == null) {
             log.warn("Received SETTLEMENT_DECLINED for unknown payment {}", event.paymentId());
             return;
         }
 
-        state.advanceTo(PaymentState.COMPENSATING, Instant.now());
-        sagaStateRepository.save(state);
+        sagaEventStore.append(aggregate, "SETTLEMENT_DECLINED", PaymentState.COMPENSATING, Instant.now());
         log.info("Payment {} COMPENSATING — settlement declined: {}", event.paymentId(), event.reason());
 
         ReverseLedgerCommand command = new ReverseLedgerCommand(
-                event.paymentId(), state.getPayerAccount(), state.getAmountCents(), Instant.now());
+                event.paymentId(), aggregate.getPayerAccount(), aggregate.getAmountCents(), Instant.now());
         publishCommand(event.paymentId(), "REVERSE_LEDGER", command);
         log.info("Payment {} COMPENSATING -> issued REVERSE_LEDGER", event.paymentId());
     }
 
     private void onLedgerReversed(EventEnvelope envelope) throws Exception {
         UUID paymentId = envelope.aggregateId();
-        PaymentSagaState state = sagaStateRepository.findById(paymentId).orElse(null);
-        if (state == null) {
+        PaymentSagaAggregate aggregate = sagaEventStore.load(paymentId).orElse(null);
+        if (aggregate == null) {
             log.warn("Received LEDGER_REVERSED for unknown payment {}", paymentId);
             return;
         }
@@ -250,40 +243,38 @@ public class PaymentEventListener {
         // two compensating actions; it only reaches COMPENSATED once the
         // funds reservation is released too.
         ReleaseFundsCommand command = new ReleaseFundsCommand(
-                paymentId, state.getPayerAccount(), state.getAmountCents(), Instant.now());
+                paymentId, aggregate.getPayerAccount(), aggregate.getAmountCents(), Instant.now());
         publishCommand(paymentId, "RELEASE_FUNDS", command);
         log.info("Payment {} ledger reversed -> issued RELEASE_FUNDS", paymentId);
     }
 
     private void onFundsReleased(EventEnvelope envelope) throws Exception {
         UUID paymentId = envelope.aggregateId();
-        PaymentSagaState state = sagaStateRepository.findById(paymentId).orElse(null);
-        if (state == null) {
+        PaymentSagaAggregate aggregate = sagaEventStore.load(paymentId).orElse(null);
+        if (aggregate == null) {
             log.warn("Received FUNDS_RELEASED for unknown payment {}", paymentId);
             return;
         }
 
-        state.advanceTo(PaymentState.COMPENSATED, Instant.now());
-        sagaStateRepository.save(state);
+        sagaEventStore.append(aggregate, "FUNDS_RELEASED", PaymentState.COMPENSATED, Instant.now());
         log.info("Payment {} COMPENSATED — compensation complete, funds returned to payer", paymentId);
 
         publishEvent(paymentId, PaymentEventType.PAYMENT_COMPENSATED,
-                new PaymentCompensatedEvent(paymentId, state.getPayerAccount(), Instant.now()));
+                new PaymentCompensatedEvent(paymentId, aggregate.getPayerAccount(), Instant.now()));
     }
 
-    private void failSaga(UUID paymentId, String reason, String logLabel) throws Exception {
-        PaymentSagaState state = sagaStateRepository.findById(paymentId).orElse(null);
-        if (state == null) {
+    private void failSaga(UUID paymentId, String triggerEventType, String reason, String logLabel) throws Exception {
+        PaymentSagaAggregate aggregate = sagaEventStore.load(paymentId).orElse(null);
+        if (aggregate == null) {
             log.warn("Received a failure signal for unknown payment {}", paymentId);
             return;
         }
 
-        state.advanceTo(PaymentState.FAILED, Instant.now());
-        sagaStateRepository.save(state);
+        sagaEventStore.append(aggregate, triggerEventType, PaymentState.FAILED, Instant.now());
         log.info("Payment {} FAILED — {}: {}", paymentId, logLabel, reason);
 
         publishEvent(paymentId, PaymentEventType.PAYMENT_FAILED,
-                new PaymentFailedEvent(paymentId, state.getPayerAccount(), reason, Instant.now()));
+                new PaymentFailedEvent(paymentId, aggregate.getPayerAccount(), reason, Instant.now()));
     }
 
     private void publishCommand(UUID paymentId, String commandType, Object payload) throws Exception {

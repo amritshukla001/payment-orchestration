@@ -1,7 +1,7 @@
 package com.payflow.orchestrator.api;
 
 import com.payflow.orchestrator.api.dto.SagaResponse;
-import com.payflow.orchestrator.repository.PaymentSagaStateRepository;
+import com.payflow.orchestrator.domain.SagaEventStore;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
@@ -19,22 +19,22 @@ import java.util.UUID;
 @RequestMapping("/api/sagas")
 public class SagaController {
 
-    private final PaymentSagaStateRepository repository;
+    private final SagaEventStore sagaEventStore;
 
-    public SagaController(PaymentSagaStateRepository repository) {
-        this.repository = repository;
+    public SagaController(SagaEventStore sagaEventStore) {
+        this.sagaEventStore = sagaEventStore;
     }
 
     @GetMapping
     public List<SagaResponse> list() {
-        return repository.findAllByOrderByUpdatedAtDesc().stream()
+        return sagaEventStore.loadAll().stream()
                 .map(SagaResponse::from)
                 .toList();
     }
 
     @GetMapping("/{paymentId}")
     public SagaResponse get(@PathVariable UUID paymentId) {
-        return repository.findById(paymentId)
+        return sagaEventStore.load(paymentId)
                 .map(SagaResponse::from)
                 .orElseThrow(() -> new SagaNotFoundException(paymentId));
     }

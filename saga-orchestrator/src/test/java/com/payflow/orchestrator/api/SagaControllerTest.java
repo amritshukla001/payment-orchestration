@@ -1,8 +1,8 @@
 package com.payflow.orchestrator.api;
 
 import com.payflow.common.enums.PaymentState;
-import com.payflow.orchestrator.domain.PaymentSagaState;
-import com.payflow.orchestrator.repository.PaymentSagaStateRepository;
+import com.payflow.orchestrator.domain.PaymentSagaAggregate;
+import com.payflow.orchestrator.domain.SagaEventStore;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.autoconfigure.web.servlet.WebMvcTest;
@@ -25,14 +25,14 @@ class SagaControllerTest {
     private MockMvc mockMvc;
 
     @MockBean
-    private PaymentSagaStateRepository repository;
+    private SagaEventStore sagaEventStore;
 
     @Test
     void listReturnsSagasMostRecentlyUpdatedFirst() throws Exception {
-        PaymentSagaState saga = new PaymentSagaState(
+        PaymentSagaAggregate saga = new PaymentSagaAggregate(
                 UUID.randomUUID(), UUID.randomUUID(), UUID.randomUUID(),
                 5_000L, "USD", PaymentState.SETTLED, Instant.now());
-        when(repository.findAllByOrderByUpdatedAtDesc()).thenReturn(List.of(saga));
+        when(sagaEventStore.loadAll()).thenReturn(List.of(saga));
 
         mockMvc.perform(get("/api/sagas"))
                 .andExpect(status().isOk())
@@ -43,10 +43,10 @@ class SagaControllerTest {
     @Test
     void getReturnsTheSagaForAKnownPayment() throws Exception {
         UUID paymentId = UUID.randomUUID();
-        PaymentSagaState saga = new PaymentSagaState(
+        PaymentSagaAggregate saga = new PaymentSagaAggregate(
                 paymentId, UUID.randomUUID(), UUID.randomUUID(),
                 1_000L, "USD", PaymentState.COMPENSATED, Instant.now());
-        when(repository.findById(paymentId)).thenReturn(Optional.of(saga));
+        when(sagaEventStore.load(paymentId)).thenReturn(Optional.of(saga));
 
         mockMvc.perform(get("/api/sagas/{id}", paymentId))
                 .andExpect(status().isOk())
@@ -56,7 +56,7 @@ class SagaControllerTest {
     @Test
     void getReturns404ForAnUnknownPayment() throws Exception {
         UUID paymentId = UUID.randomUUID();
-        when(repository.findById(paymentId)).thenReturn(Optional.empty());
+        when(sagaEventStore.load(paymentId)).thenReturn(Optional.empty());
 
         mockMvc.perform(get("/api/sagas/{id}", paymentId))
                 .andExpect(status().isNotFound());

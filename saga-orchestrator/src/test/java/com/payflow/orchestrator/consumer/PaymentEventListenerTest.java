@@ -12,8 +12,8 @@ import com.payflow.common.commands.ReverseLedgerCommand;
 import com.payflow.common.commands.SettleCommand;
 import com.payflow.common.enums.PaymentState;
 import com.payflow.common.events.*;
-import com.payflow.orchestrator.domain.PaymentSagaState;
-import com.payflow.orchestrator.repository.PaymentSagaStateRepository;
+import com.payflow.orchestrator.domain.PaymentSagaAggregate;
+import com.payflow.orchestrator.domain.SagaEventStore;
 import com.payflow.orchestrator.repository.ProcessedEventRepository;
 import org.apache.kafka.clients.consumer.ConsumerRecord;
 import org.junit.jupiter.api.BeforeEach;
@@ -26,6 +26,7 @@ import org.springframework.kafka.core.KafkaTemplate;
 import org.springframework.kafka.support.Acknowledgment;
 
 import java.time.Instant;
+import java.util.List;
 import java.util.Optional;
 import java.util.UUID;
 import java.util.concurrent.CompletableFuture;
@@ -40,12 +41,16 @@ import static org.mockito.Mockito.*;
  * here mirrors a scenario previously verified by hand with curl + psql
  * across each build phase. A future change to the orchestrator that
  * silently breaks one of these transitions fails CI instead of shipping.
+ * Assertions here verify the correct fact was appended to the event log
+ * (via SagaEventStore) rather than inspecting a mutated entity — the
+ * store's own fold/append correctness is covered separately by
+ * SagaEventStoreTest and PaymentSagaAggregateTest.
  */
 @ExtendWith(MockitoExtension.class)
 class PaymentEventListenerTest {
 
     @Mock
-    private PaymentSagaStateRepository sagaStateRepository;
+    private SagaEventStore sagaEventStore;
     @Mock
     private ProcessedEventRepository processedEventRepository;
     @Mock
@@ -59,13 +64,13 @@ class PaymentEventListenerTest {
     @BeforeEach
     void setUp() {
         objectMapper = new ObjectMapper().registerModule(new JavaTimeModule());
-        listener = new PaymentEventListener(sagaStateRepository, processedEventRepository, kafkaTemplate, objectMapper);
+        listener = new PaymentEventListener(sagaEventStore, processedEventRepository, kafkaTemplate, objectMapper);
         lenient().when(kafkaTemplate.send(anyString(), anyString(), anyString()))
                 .thenReturn(CompletableFuture.completedFuture(null));
     }
 
     @Test
-    void paymentInitiatedSavesStateAndIssuesCheckFraud() throws Exception {
+    void paymentInitiatedAppendsTheInitialFactAndIssuesCheckFraud() throws Exception {
         UUID paymentId = UUID.randomUUID();
         UUID payerAccount = UUID.randomUUID();
         UUID payeeAccount = UUID.randomUUID();
@@ -74,13 +79,8 @@ class PaymentEventListenerTest {
 
         listener.onEvent(recordFor(paymentId, PaymentEventType.PAYMENT_INITIATED, event), ack);
 
-        ArgumentCaptor<PaymentSagaState> stateCaptor = ArgumentCaptor.forClass(PaymentSagaState.class);
-        verify(sagaStateRepository).save(stateCaptor.capture());
-        PaymentSagaState saved = stateCaptor.getValue();
-        assertThat(saved.getPaymentId()).isEqualTo(paymentId);
-        assertThat(saved.getPayerAccount()).isEqualTo(payerAccount);
-        assertThat(saved.getPayeeAccount()).isEqualTo(payeeAccount);
-        assertThat(saved.getState()).isEqualTo(PaymentState.INITIATED);
+        verify(sagaEventStore).appendInitiated(eq(paymentId), eq(payerAccount), eq(payeeAccount),
+                eq(5_000L), eq("USD"), any(Instant.class));
 
         CheckFraudCommand command = capturedCommand(paymentId, "CHECK_FRAUD", CheckFraudCommand.class);
         assertThat(command.payerAccount()).isEqualTo(payerAccount);
@@ -90,151 +90,151 @@ class PaymentEventListenerTest {
     }
 
     @Test
-    void fraudApprovedAdvancesToFraudCheckedAndIssuesAuthorizeFunds() throws Exception {
+    void fraudApprovedAppendsFraudCheckedAndIssuesAuthorizeFunds() throws Exception {
         UUID paymentId = UUID.randomUUID();
-        PaymentSagaState existing = existingState(paymentId, PaymentState.INITIATED);
-        when(sagaStateRepository.findById(paymentId)).thenReturn(Optional.of(existing));
+        PaymentSagaAggregate existing = existingAggregate(paymentId, PaymentState.INITIATED);
+        when(sagaEventStore.load(paymentId)).thenReturn(Optional.of(existing));
 
         listener.onEvent(recordFor(paymentId, PaymentEventType.FRAUD_APPROVED,
                 new FraudApprovedEvent(paymentId, Instant.now())), ack);
 
-        assertThat(existing.getState()).isEqualTo(PaymentState.FRAUD_CHECKED);
-        verify(sagaStateRepository).save(existing);
+        verify(sagaEventStore).append(same(existing), eq("FRAUD_APPROVED"), eq(PaymentState.FRAUD_CHECKED), any(Instant.class));
 
         AuthorizeFundsCommand command = capturedCommand(paymentId, "AUTHORIZE_FUNDS", AuthorizeFundsCommand.class);
         assertThat(command.payerAccount()).isEqualTo(existing.getPayerAccount());
     }
 
     @Test
-    void fraudRejectedEndsTheSagaInFailedAndPublishesPaymentFailed() throws Exception {
+    void fraudRejectedAppendsFailedAndPublishesPaymentFailed() throws Exception {
         UUID paymentId = UUID.randomUUID();
-        PaymentSagaState existing = existingState(paymentId, PaymentState.INITIATED);
-        when(sagaStateRepository.findById(paymentId)).thenReturn(Optional.of(existing));
+        PaymentSagaAggregate existing = existingAggregate(paymentId, PaymentState.INITIATED);
+        when(sagaEventStore.load(paymentId)).thenReturn(Optional.of(existing));
 
         listener.onEvent(recordFor(paymentId, PaymentEventType.FRAUD_REJECTED,
                 new FraudRejectedEvent(paymentId, "over threshold", Instant.now())), ack);
 
-        assertThat(existing.getState()).isEqualTo(PaymentState.FAILED);
+        verify(sagaEventStore).append(same(existing), eq("FRAUD_REJECTED"), eq(PaymentState.FAILED), any(Instant.class));
         PaymentFailedEvent event = capturedEvent(paymentId, "PAYMENT_FAILED", PaymentFailedEvent.class);
         assertThat(event.payerAccount()).isEqualTo(existing.getPayerAccount());
         assertThat(event.reason()).isEqualTo("over threshold");
     }
 
     @Test
-    void fundsAuthorizedAdvancesToAuthorizedAndIssuesPostLedger() throws Exception {
+    void fundsAuthorizedAppendsAuthorizedAndIssuesPostLedger() throws Exception {
         UUID paymentId = UUID.randomUUID();
-        PaymentSagaState existing = existingState(paymentId, PaymentState.FRAUD_CHECKED);
-        when(sagaStateRepository.findById(paymentId)).thenReturn(Optional.of(existing));
+        PaymentSagaAggregate existing = existingAggregate(paymentId, PaymentState.FRAUD_CHECKED);
+        when(sagaEventStore.load(paymentId)).thenReturn(Optional.of(existing));
 
         listener.onEvent(recordFor(paymentId, PaymentEventType.FUNDS_AUTHORIZED,
                 new FundsAuthorizedEvent(paymentId, Instant.now())), ack);
 
-        assertThat(existing.getState()).isEqualTo(PaymentState.AUTHORIZED);
+        verify(sagaEventStore).append(same(existing), eq("FUNDS_AUTHORIZED"), eq(PaymentState.AUTHORIZED), any(Instant.class));
         PostLedgerCommand command = capturedCommand(paymentId, "POST_LEDGER", PostLedgerCommand.class);
         assertThat(command.payeeAccount()).isEqualTo(existing.getPayeeAccount());
     }
 
     @Test
-    void fundsAuthorizationFailedEndsTheSagaInFailedAndPublishesPaymentFailed() throws Exception {
+    void fundsAuthorizationFailedAppendsFailedAndPublishesPaymentFailed() throws Exception {
         UUID paymentId = UUID.randomUUID();
-        PaymentSagaState existing = existingState(paymentId, PaymentState.FRAUD_CHECKED);
-        when(sagaStateRepository.findById(paymentId)).thenReturn(Optional.of(existing));
+        PaymentSagaAggregate existing = existingAggregate(paymentId, PaymentState.FRAUD_CHECKED);
+        when(sagaEventStore.load(paymentId)).thenReturn(Optional.of(existing));
 
         listener.onEvent(recordFor(paymentId, PaymentEventType.FUNDS_AUTHORIZATION_FAILED,
                 new FundsAuthorizationFailedEvent(paymentId, "insufficient funds", Instant.now())), ack);
 
-        assertThat(existing.getState()).isEqualTo(PaymentState.FAILED);
+        verify(sagaEventStore).append(same(existing), eq("FUNDS_AUTHORIZATION_FAILED"), eq(PaymentState.FAILED), any(Instant.class));
         PaymentFailedEvent event = capturedEvent(paymentId, "PAYMENT_FAILED", PaymentFailedEvent.class);
         assertThat(event.payerAccount()).isEqualTo(existing.getPayerAccount());
         assertThat(event.reason()).isEqualTo("insufficient funds");
     }
 
     @Test
-    void ledgerPostedAdvancesToLedgerPostedAndIssuesSettle() throws Exception {
+    void ledgerPostedAppendsLedgerPostedAndIssuesSettle() throws Exception {
         UUID paymentId = UUID.randomUUID();
-        PaymentSagaState existing = existingState(paymentId, PaymentState.AUTHORIZED);
-        when(sagaStateRepository.findById(paymentId)).thenReturn(Optional.of(existing));
+        PaymentSagaAggregate existing = existingAggregate(paymentId, PaymentState.AUTHORIZED);
+        when(sagaEventStore.load(paymentId)).thenReturn(Optional.of(existing));
 
         listener.onEvent(recordFor(paymentId, PaymentEventType.LEDGER_POSTED,
                 new LedgerPostedEvent(UUID.randomUUID(), paymentId, UUID.randomUUID(), UUID.randomUUID(),
                         5_000L, "HOLD", Instant.now())), ack);
 
-        assertThat(existing.getState()).isEqualTo(PaymentState.LEDGER_POSTED);
+        verify(sagaEventStore).append(same(existing), eq("LEDGER_POSTED"), eq(PaymentState.LEDGER_POSTED), any(Instant.class));
         SettleCommand command = capturedCommand(paymentId, "SETTLE", SettleCommand.class);
         assertThat(command.payeeAccount()).isEqualTo(existing.getPayeeAccount());
     }
 
     @Test
-    void paymentSettledAdvancesToSettledAndIssuesPostFinalLedger() throws Exception {
+    void paymentSettledAppendsSettledAndIssuesPostFinalLedger() throws Exception {
         UUID paymentId = UUID.randomUUID();
-        PaymentSagaState existing = existingState(paymentId, PaymentState.LEDGER_POSTED);
-        when(sagaStateRepository.findById(paymentId)).thenReturn(Optional.of(existing));
+        PaymentSagaAggregate existing = existingAggregate(paymentId, PaymentState.LEDGER_POSTED);
+        when(sagaEventStore.load(paymentId)).thenReturn(Optional.of(existing));
 
         listener.onEvent(recordFor(paymentId, PaymentEventType.PAYMENT_SETTLED,
                 new PaymentSettledEvent(paymentId, existing.getPayerAccount(), existing.getPayeeAccount(), Instant.now())), ack);
 
-        assertThat(existing.getState()).isEqualTo(PaymentState.SETTLED);
+        verify(sagaEventStore).append(same(existing), eq("PAYMENT_SETTLED"), eq(PaymentState.SETTLED), any(Instant.class));
         PostFinalLedgerCommand command = capturedCommand(paymentId, "POST_FINAL_LEDGER", PostFinalLedgerCommand.class);
         assertThat(command.payeeAccount()).isEqualTo(existing.getPayeeAccount());
     }
 
     @Test
-    void ledgerFinalizedIsInformationalAndDoesNotChangeSagaState() throws Exception {
+    void ledgerFinalizedIsInformationalAndDoesNotTouchTheEventLog() throws Exception {
         UUID paymentId = UUID.randomUUID();
-        // LEDGER_FINALIZED is deliberately not looked up in the repository at
-        // all -- it's a pure audit-log signal, so no findById should even happen.
+        // LEDGER_FINALIZED is deliberately not looked up at all -- it's a
+        // pure audit-log signal, so no load() should even happen.
 
         listener.onEvent(recordFor(paymentId, PaymentEventType.LEDGER_FINALIZED,
                 new LedgerFinalizedEvent(UUID.randomUUID(), paymentId, UUID.randomUUID(), UUID.randomUUID(),
                         5_000L, "FINAL", Instant.now())), ack);
 
-        verifyNoInteractions(sagaStateRepository);
+        verifyNoInteractions(sagaEventStore);
         verifyNoInteractions(kafkaTemplate);
         verify(ack).acknowledge();
     }
 
     @Test
-    void settlementDeclinedAdvancesToCompensatingAndIssuesReverseLedger() throws Exception {
+    void settlementDeclinedAppendsCompensatingAndIssuesReverseLedger() throws Exception {
         UUID paymentId = UUID.randomUUID();
-        PaymentSagaState existing = existingState(paymentId, PaymentState.LEDGER_POSTED);
-        when(sagaStateRepository.findById(paymentId)).thenReturn(Optional.of(existing));
+        PaymentSagaAggregate existing = existingAggregate(paymentId, PaymentState.LEDGER_POSTED);
+        when(sagaEventStore.load(paymentId)).thenReturn(Optional.of(existing));
 
         listener.onEvent(recordFor(paymentId, PaymentEventType.SETTLEMENT_DECLINED,
                 new SettlementDeclinedEvent(paymentId, "issuer declined capture", Instant.now())), ack);
 
-        assertThat(existing.getState()).isEqualTo(PaymentState.COMPENSATING);
+        verify(sagaEventStore).append(same(existing), eq("SETTLEMENT_DECLINED"), eq(PaymentState.COMPENSATING), any(Instant.class));
         ReverseLedgerCommand command = capturedCommand(paymentId, "REVERSE_LEDGER", ReverseLedgerCommand.class);
         assertThat(command.payerAccount()).isEqualTo(existing.getPayerAccount());
         assertThat(command.amountCents()).isEqualTo(existing.getAmountCents());
     }
 
     @Test
-    void ledgerReversedStaysCompensatingAndIssuesReleaseFunds() throws Exception {
+    void ledgerReversedDoesNotAppendAndIssuesReleaseFunds() throws Exception {
         UUID paymentId = UUID.randomUUID();
-        PaymentSagaState existing = existingState(paymentId, PaymentState.COMPENSATING);
-        when(sagaStateRepository.findById(paymentId)).thenReturn(Optional.of(existing));
+        PaymentSagaAggregate existing = existingAggregate(paymentId, PaymentState.COMPENSATING);
+        when(sagaEventStore.load(paymentId)).thenReturn(Optional.of(existing));
 
         listener.onEvent(recordFor(paymentId, PaymentEventType.LEDGER_REVERSED,
                 new LedgerReversedEvent(UUID.randomUUID(), paymentId, UUID.randomUUID(), UUID.randomUUID(),
                         5_000L, "REVERSAL", Instant.now())), ack);
 
         // Compensation isn't complete yet -- releasing funds is the second
-        // half, so the state must not jump to COMPENSATED prematurely.
-        assertThat(existing.getState()).isEqualTo(PaymentState.COMPENSATING);
+        // half, so no new fact is recorded and the state must not jump to
+        // COMPENSATED prematurely.
+        verify(sagaEventStore, never()).append(any(), any(), any(), any());
         ReleaseFundsCommand command = capturedCommand(paymentId, "RELEASE_FUNDS", ReleaseFundsCommand.class);
         assertThat(command.payerAccount()).isEqualTo(existing.getPayerAccount());
     }
 
     @Test
-    void fundsReleasedAdvancesToCompensatedAndPublishesPaymentCompensated() throws Exception {
+    void fundsReleasedAppendsCompensatedAndPublishesPaymentCompensated() throws Exception {
         UUID paymentId = UUID.randomUUID();
-        PaymentSagaState existing = existingState(paymentId, PaymentState.COMPENSATING);
-        when(sagaStateRepository.findById(paymentId)).thenReturn(Optional.of(existing));
+        PaymentSagaAggregate existing = existingAggregate(paymentId, PaymentState.COMPENSATING);
+        when(sagaEventStore.load(paymentId)).thenReturn(Optional.of(existing));
 
         listener.onEvent(recordFor(paymentId, PaymentEventType.FUNDS_RELEASED,
                 new FundsReleasedEvent(paymentId, Instant.now())), ack);
 
-        assertThat(existing.getState()).isEqualTo(PaymentState.COMPENSATED);
+        verify(sagaEventStore).append(same(existing), eq("FUNDS_RELEASED"), eq(PaymentState.COMPENSATED), any(Instant.class));
         PaymentCompensatedEvent event = capturedEvent(paymentId, "PAYMENT_COMPENSATED", PaymentCompensatedEvent.class);
         assertThat(event.payerAccount()).isEqualTo(existing.getPayerAccount());
     }
@@ -242,25 +242,26 @@ class PaymentEventListenerTest {
     @Test
     void fullCompensationSequenceEndsInCompensatedNotFailed() throws Exception {
         // The end-to-end shape of the compensation path, chained through
-        // one saga state object exactly as the real Kafka round trips would --
+        // one saga aggregate exactly as the real Kafka round trips would --
         // proves the whole sequence lands on COMPENSATED, not stuck or
-        // silently falling back to FAILED.
+        // silently falling back to FAILED. LEDGER_REVERSED appends nothing,
+        // so exactly two facts should be recorded: COMPENSATING, then
+        // COMPENSATED.
         UUID paymentId = UUID.randomUUID();
-        PaymentSagaState existing = existingState(paymentId, PaymentState.LEDGER_POSTED);
-        when(sagaStateRepository.findById(paymentId)).thenReturn(Optional.of(existing));
+        PaymentSagaAggregate existing = existingAggregate(paymentId, PaymentState.LEDGER_POSTED);
+        when(sagaEventStore.load(paymentId)).thenReturn(Optional.of(existing));
 
         listener.onEvent(recordFor(paymentId, PaymentEventType.SETTLEMENT_DECLINED,
                 new SettlementDeclinedEvent(paymentId, "issuer declined capture", Instant.now())), ack);
-        assertThat(existing.getState()).isEqualTo(PaymentState.COMPENSATING);
-
         listener.onEvent(recordFor(paymentId, PaymentEventType.LEDGER_REVERSED,
                 new LedgerReversedEvent(UUID.randomUUID(), paymentId, UUID.randomUUID(), UUID.randomUUID(),
                         5_000L, "REVERSAL", Instant.now())), ack);
-        assertThat(existing.getState()).isEqualTo(PaymentState.COMPENSATING);
-
         listener.onEvent(recordFor(paymentId, PaymentEventType.FUNDS_RELEASED,
                 new FundsReleasedEvent(paymentId, Instant.now())), ack);
-        assertThat(existing.getState()).isEqualTo(PaymentState.COMPENSATED);
+
+        ArgumentCaptor<PaymentState> stateCaptor = ArgumentCaptor.forClass(PaymentState.class);
+        verify(sagaEventStore, times(2)).append(same(existing), anyString(), stateCaptor.capture(), any(Instant.class));
+        assertThat(stateCaptor.getAllValues()).containsExactly(PaymentState.COMPENSATING, PaymentState.COMPENSATED);
     }
 
     @Test
@@ -273,7 +274,7 @@ class PaymentEventListenerTest {
 
         listener.onEvent(record, ack);
 
-        verifyNoInteractions(sagaStateRepository);
+        verifyNoInteractions(sagaEventStore);
         verifyNoInteractions(kafkaTemplate);
         verify(ack).acknowledge();
     }
@@ -281,12 +282,12 @@ class PaymentEventListenerTest {
     @Test
     void anEventForAnUnknownPaymentIsLoggedAndSkippedWithoutThrowing() throws Exception {
         UUID paymentId = UUID.randomUUID();
-        when(sagaStateRepository.findById(paymentId)).thenReturn(Optional.empty());
+        when(sagaEventStore.load(paymentId)).thenReturn(Optional.empty());
 
         listener.onEvent(recordFor(paymentId, PaymentEventType.FRAUD_APPROVED,
                 new FraudApprovedEvent(paymentId, Instant.now())), ack);
 
-        verify(sagaStateRepository, never()).save(any());
+        verify(sagaEventStore, never()).append(any(), any(), any(), any());
         verifyNoInteractions(kafkaTemplate);
         verify(ack).acknowledge();
     }
@@ -294,17 +295,16 @@ class PaymentEventListenerTest {
     @Test
     void aFailureDuringHandlingPropagatesInsteadOfBeingSwallowed() throws Exception {
         // Resilience4j's @Retry only retries a method that actually throws --
-        // this proves the old try/catch (which swallowed everything and let
-        // the transaction commit partial state) is gone, and a failure is
-        // now visible to the caller instead of silently logged. In the real
-        // app that caller is the Retry-then-Transactional AOP proxy, not a
-        // plain-Mockito listener like this one, so this test doesn't exercise
-        // retry/backoff itself -- it just characterizes that a failure is no
-        // longer swallowed at the method level.
+        // this proves a failure is visible to the caller instead of silently
+        // logged. In the real app that caller is the Retry-then-Transactional
+        // AOP proxy, not a plain-Mockito listener like this one, so this test
+        // doesn't exercise retry/backoff itself -- it just characterizes that
+        // a failure propagates rather than being swallowed at the method level.
         UUID paymentId = UUID.randomUUID();
         PaymentInitiatedEvent event = new PaymentInitiatedEvent(
                 paymentId, UUID.randomUUID(), UUID.randomUUID(), 5_000L, "USD", Instant.now());
-        when(sagaStateRepository.save(any())).thenThrow(new RuntimeException("transient DB blip"));
+        doThrow(new RuntimeException("transient DB blip"))
+                .when(sagaEventStore).appendInitiated(any(), any(), any(), anyLong(), any(), any());
 
         assertThatThrownBy(() -> listener.onEvent(recordFor(paymentId, PaymentEventType.PAYMENT_INITIATED, event), ack))
                 .isInstanceOf(RuntimeException.class)
@@ -315,8 +315,8 @@ class PaymentEventListenerTest {
 
     // --- helpers -------------------------------------------------------
 
-    private PaymentSagaState existingState(UUID paymentId, PaymentState state) {
-        return new PaymentSagaState(paymentId, UUID.randomUUID(), UUID.randomUUID(), 5_000L, "USD", state, Instant.now());
+    private PaymentSagaAggregate existingAggregate(UUID paymentId, PaymentState state) {
+        return new PaymentSagaAggregate(paymentId, UUID.randomUUID(), UUID.randomUUID(), 5_000L, "USD", state, Instant.now());
     }
 
     private <T> ConsumerRecord<String, String> recordFor(UUID paymentId, PaymentEventType type, T payload) throws Exception {

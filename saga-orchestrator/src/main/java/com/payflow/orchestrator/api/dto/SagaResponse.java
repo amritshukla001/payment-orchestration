@@ -1,6 +1,6 @@
 package com.payflow.orchestrator.api.dto;
 
-import com.payflow.orchestrator.domain.PaymentSagaState;
+import com.payflow.orchestrator.domain.PaymentSagaAggregate;
 
 import java.time.Instant;
 import java.util.UUID;
@@ -14,7 +14,7 @@ public record SagaResponse(
         String state,
         Instant updatedAt
 ) {
-    public static SagaResponse from(PaymentSagaState saga) {
+    public static SagaResponse from(PaymentSagaAggregate saga) {
         return new SagaResponse(
                 saga.getPaymentId(),
                 saga.getPayerAccount(),
