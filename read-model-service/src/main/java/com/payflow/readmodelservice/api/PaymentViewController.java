@@ -8,6 +8,8 @@ import com.payflow.readmodelservice.domain.PaymentView;
 import com.payflow.readmodelservice.repository.LedgerEntryViewRepository;
 import com.payflow.readmodelservice.repository.NotificationViewRepository;
 import com.payflow.readmodelservice.repository.PaymentViewRepository;
+import io.swagger.v3.oas.annotations.Operation;
+import io.swagger.v3.oas.annotations.tags.Tag;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
@@ -22,6 +24,7 @@ import java.util.UUID;
  */
 @RestController
 @RequestMapping("/api/payments")
+@Tag(name = "Payments (read model)", description = "Denormalized CQRS projection built from payment.events")
 public class PaymentViewController {
 
     private final PaymentViewRepository paymentViewRepository;
@@ -36,6 +39,7 @@ public class PaymentViewController {
         this.notificationViewRepository = notificationViewRepository;
     }
 
+    @Operation(summary = "List all payments", description = "Every payment's current state, most recently updated first — the dashboard grid.")
     @GetMapping
     public List<PaymentViewResponse> list() {
         return paymentViewRepository.findAllByOrderByUpdatedAtDesc().stream()
@@ -43,6 +47,8 @@ public class PaymentViewController {
                 .toList();
     }
 
+    @Operation(summary = "Get a payment's full detail",
+            description = "One response bundling the payment's state, ledger postings, and notifications — the dashboard's detail drawer.")
     @GetMapping("/{paymentId}")
     public PaymentDetailResponse get(@PathVariable UUID paymentId) {
         PaymentView view = paymentViewRepository.findById(paymentId)

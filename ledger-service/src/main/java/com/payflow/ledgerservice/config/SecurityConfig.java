@@ -15,7 +15,7 @@ public class SecurityConfig {
     public FilterRegistrationBean<ApiKeyAuthFilter> apiKeyAuthFilter(
             @Value("${payflow.security.api-key}") String apiKey) {
         FilterRegistrationBean<ApiKeyAuthFilter> registration = new FilterRegistrationBean<>(
-                new ApiKeyAuthFilter(apiKey, List.of("/actuator")));
+                new ApiKeyAuthFilter(apiKey, List.of("/actuator", "/v3/api-docs", "/swagger-ui")));
         registration.addUrlPatterns("/*");
         return registration;
     }

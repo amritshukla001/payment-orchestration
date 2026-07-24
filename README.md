@@ -641,10 +641,13 @@ number, funds-auth-service now cache-asides account balance in Redis
 behind a circuit breaker (see [Caching](#caching)), a Spring Cloud
 Gateway edge service now fronts the REST-exposing services with
 centralized routing, auth, rate limiting, and CORS (see
-[API Gateway](#api-gateway)), payment-api now serves a live OpenAPI
-spec and Swagger UI (`/v3/api-docs`, `/swagger-ui/index.html`) generated
-straight from `PaymentController`, exempted from API-key auth the same
-way `/actuator` is so the docs themselves are publicly browsable, and
+[API Gateway](#api-gateway)), every REST-exposing service (payment-api,
+saga-orchestrator, ledger-service, notification-service,
+read-model-service) now serves a live OpenAPI spec and Swagger UI
+(`/v3/api-docs`, `/swagger-ui/index.html`) generated straight from its
+controllers, exempted from API-key auth the same way `/actuator` is so the
+docs themselves are publicly browsable (each UI's Authorize button attaches
+the `X-API-Key` header for actually calling the endpoints), and
 fraud-service now has a fourth `FraudRule` backed by a small hand-trained
 classifier, circuit-breaker-guarded so a down ML service degrades to the
 deterministic rules instead of blocking the saga (see
@@ -793,8 +796,15 @@ too.
 Either way: Kafka UI is at http://localhost:8081 for browsing topics/messages
 directly. Prometheus is at http://localhost:9090 (metrics/targets), Zipkin is
 at http://localhost:9411 (traces) — see [Observability](#observability).
-payment-api's interactive API docs are at
-http://localhost:8080/swagger-ui/index.html.
+Interactive API docs (Swagger UI) are served by every REST-exposing service
+at `/swagger-ui/index.html` on its own port — use the Authorize button with
+the API key to call endpoints from the page:
+
+- payment-api — http://localhost:8080/swagger-ui/index.html
+- saga-orchestrator — http://localhost:8082/swagger-ui/index.html
+- ledger-service — http://localhost:8085/swagger-ui/index.html
+- notification-service — http://localhost:8087/swagger-ui/index.html
+- read-model-service — http://localhost:8089/swagger-ui/index.html
 
 ### Try it
 
