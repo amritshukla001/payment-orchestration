@@ -76,8 +76,13 @@ steps in the reverse order they were applied.
   `PAYMENT_COMPENSATED` rather than reacting to an orchestrator-issued
   command, since nothing depends on a notification succeeding. Notifies
   both payer and payee on success; payer only on failure or compensation.
-  Its Kafka config is consumer-only — no producer, because it never
-  publishes anything back.
+  Also publishes a `NOTIFICATION_SENT` event after each one purely for
+  [read-model-service](#cqrs-read-model) — the one thing it produces onto
+  the bus, since nothing else in the saga reacts to it.
+- **read-model-service** — the [CQRS read model](#cqrs-read-model): a pure
+  Observer over `payment.events`, projecting a denormalized view for the
+  dashboard, asynchronously consistent with and decoupled from every other
+  service's own database.
 - **common** — shared event/command contracts (`EventEnvelope`, `PaymentState`,
   event and command records) used by every service.
 
@@ -87,10 +92,10 @@ at-least-once delivery, so idempotent processing is what makes redelivery
 safe rather than a source of duplicate work.
 
 Each service owns its own Postgres database (`payflow`, `orchestrator`,
-`fraud`, `fundsauth`, `ledger`, `settlement`, `notification`), even though
-they currently share one container for local-dev convenience — mirrors
-"database per service" without needing a separate Postgres instance per
-service.
+`fraud`, `fundsauth`, `ledger`, `settlement`, `notification`, `readmodel`),
+even though they currently share one container for local-dev convenience —
+mirrors "database per service" without needing a separate Postgres instance
+per service.
 
 ## Compensation
 
@@ -135,7 +140,7 @@ balance restored to its exact starting value, the funds reservation marked
   a database and Kafka.
 - **Idempotent Consumer** — every consumer checks its own `processed_events`
   table before acting, since Kafka only guarantees at-least-once delivery.
-- **Database per service** — seven services, seven separate Postgres
+- **Database per service** — eight services, eight separate Postgres
   databases, no shared schema.
 - **Optimistic locking** — `@Version` on `Payment`, `PaymentSagaState`, and
   `Account` guards concurrent writers without pessimistic locks.
@@ -144,6 +149,9 @@ balance restored to its exact starting value, the funds reservation marked
   `V2` migration, never editing the applied `V1`.
 - **Consistency tradeoffs** — strong (ACID) consistency within each
   service's own database, eventual consistency across the saga as a whole.
+- **CQRS** — [read-model-service](#cqrs-read-model) is a dedicated read side,
+  projecting a denormalized view from `payment.events` rather than the
+  dashboard querying each write-side service's own table directly.
 
 **Classic OOP / LLD (Gang of Four)**
 - **Strategy** — fraud-service's `FraudRule` interface, with
@@ -191,7 +199,7 @@ top of it.
 - **Metrics** — JVM, HTTP request, and Hikari connection-pool metrics are
   auto-instrumented by Actuator with no code changes. `docker compose`
   brings up a `prometheus` container (`docker/prometheus/prometheus.yml`)
-  that scrapes all seven services on their host ports via
+  that scrapes all nine services on their host ports via
   `host.docker.internal`, since services run on the host via
   `mvn spring-boot:run` rather than inside the compose network. Browse
   metrics/targets at http://localhost:9090.
@@ -291,11 +299,12 @@ see a stale value, never the authorization decision.
 ## API Gateway
 
 `api-gateway` (port 8088) is a Spring Cloud Gateway (reactive/WebFlux)
-service sitting in front of the four REST-exposing services — `payment-api`,
-`saga-orchestrator`, `ledger-service`, `notification-service` — routing by
-path (`/payments/**` → `payment-api`, `/api/sagas/**` → `saga-orchestrator`,
-`/api/ledger/**` → `ledger-service`, `/api/notifications/**` →
-`notification-service`). `fraud-service`, `funds-auth-service`, and
+service sitting in front of the five REST-exposing services — `payment-api`,
+`saga-orchestrator`, `ledger-service`, `notification-service`,
+`read-model-service` — routing by path (`/payments/**` → `payment-api`,
+`/api/sagas/**` → `saga-orchestrator`, `/api/ledger/**` → `ledger-service`,
+`/api/notifications/**` → `notification-service`, `/api/payments/**` →
+`read-model-service`). `fraud-service`, `funds-auth-service`, and
 `settlement-service` are Kafka-only and have nothing to route to.
 
 A custom `AuthGlobalFilter` validates `X-API-Key` at the edge before a
@@ -328,7 +337,7 @@ gone, since nothing browser-based calls those services directly anymore.
 `/actuator/**` path) lists the live route table — useful for confirming
 routing config loaded as expected.
 
-The four backend services keep their own `SecurityConfig`/`ApiKeyAuthFilter`
+The five backend services keep their own `SecurityConfig`/`ApiKeyAuthFilter`
 unchanged, deliberately: there's no network isolation between the gateway
 and the backend ports on a local machine, so removing per-service auth
 would be a real regression, not just redundancy. The gateway is a first
@@ -381,15 +390,15 @@ rules exactly as intended, never blocks the saga.
 
 ## Containerization
 
-Every one of the 8 Spring Boot modules — `payment-api`, `saga-orchestrator`,
+Every one of the 9 Spring Boot modules — `payment-api`, `saga-orchestrator`,
 `fraud-service`, `funds-auth-service`, `ledger-service`, `settlement-service`,
-`notification-service`, `api-gateway` — has its own `Dockerfile`, each a
-two-stage build: `maven:3.9-eclipse-temurin-21` compiles the jar (there's no
-Maven wrapper in this repo, so the build stage needs the image's own Maven),
-then a slim `eclipse-temurin:21-jre-alpine` runtime stage just copies it in.
-`docker-compose.yml` builds and runs all 8 alongside the existing infra, so
-`docker compose up --build` is now a complete alternative to running
-`mvn spring-boot:run` per service — see
+`notification-service`, `read-model-service`, `api-gateway` — has its own
+`Dockerfile`, each a two-stage build: `maven:3.9-eclipse-temurin-21` compiles
+the jar (there's no Maven wrapper in this repo, so the build stage needs the
+image's own Maven), then a slim `eclipse-temurin:21-jre-alpine` runtime stage
+just copies it in. `docker-compose.yml` builds and runs all 9 alongside the
+existing infra, so `docker compose up --build` is now a complete alternative
+to running `mvn spring-boot:run` per service — see
 [Running it locally](#running-it-locally) for both. The `mvn spring-boot:run`
 workflow isn't going away; it's still the faster loop for active
 development, this is just a second way to run the whole thing with nothing
@@ -398,7 +407,7 @@ but Docker installed.
 Each service's build context is the **repo root**, not its own directory:
 `common` (the shared library every service depends on) has no published
 artifact, so it has to be compiled from source as part of the same Maven
-reactor build as the service itself. All 9 modules' `pom.xml` files get
+reactor build as the service itself. All 10 modules' `pom.xml` files get
 copied and `dependency:go-offline` run before any `src/` is copied in — the
 standard Docker/Maven layer-caching trick, so a rebuild after a source-only
 change doesn't re-download the world. This was a genuine early failure
@@ -438,7 +447,7 @@ Prometheus's `/targets`, the other harmlessly shows "down," so switching
 between `mvn spring-boot:run` and `docker compose up` never means editing
 monitoring config.
 
-Verified live end to end: built and started all 8 containers alongside the
+Verified live end to end: built and started all 9 containers alongside the
 existing infra, sent a real payment through the containerized gateway
 (`:8088`), and watched it cross every container boundary — payment-api's
 Kafka command through saga-orchestrator, fraud-service, funds-auth-service
@@ -450,33 +459,60 @@ Vite/React dev app with no production build/serving setup today, a Node
 tooling concern separate from what this item was actually about (not
 needing a local Java/Maven install).
 
+## CQRS Read Model
+
+`read-model-service` is a dedicated 9th service whose only job is serving
+the dashboard: it subscribes to `payment.events`, projects a denormalized
+`payment_view` (plus `ledger_entry_view`/`notification_view` child tables)
+into its own Postgres database (`readmodel`), and exposes `GET /api/payments`
+/ `GET /api/payments/{id}` — replacing three separate read APIs that used
+to live on `saga-orchestrator`, `ledger-service`, and `notification-service`
+and query each service's own write-side table directly. It's asynchronously
+consistent with, and fully decoupled from, those services' own transactional
+stores — none of them are queried at request time, and none of their own
+REST endpoints were removed; they still work standalone.
+
+Building this required closing a real gap first: the ledger and
+notification "step-completed" events (`LEDGER_POSTED`, `LEDGER_FINALIZED`,
+`LEDGER_REVERSED`) previously carried only `paymentId`/`occurredAt` — enough
+for the orchestrator, which only needs to know "done," but not enough to
+reconstruct a posting's debit/credit accounts or type for a denormalized
+view. Those three events now carry the full posted entry (ledger-service
+already has it in hand when publishing), and `notification-service` — the
+one service that was deliberately consumer-only, since nothing in the saga
+depends on a notification succeeding — now also publishes a new
+`NOTIFICATION_SENT` event purely for this read side. Both changes are
+additive: existing consumers that only read `paymentId` off these events
+are unaffected.
+
+`GET /api/payments/{id}` bundles the payment, its ledger entries, and its
+notifications into one response — the dashboard's detail drawer used to
+need two separate calls (ledger + notifications) on top of the list; this
+collapses the whole detail view into a single round trip.
+
 ## Dashboard
 
 `dashboard/` is a small React + AG Grid ops console — a live grid of every
 payment and its current saga state, with a per-payment detail drawer showing
 ledger postings and notifications. It's deliberately *not* a new backend
-service: it's a thin client polling three read-only REST APIs added to
-existing services —
+service of its own beyond the read model above: it's a thin client polling
+[read-model-service](#cqrs-read-model)'s two read-only endpoints —
 
-- `GET /api/sagas` — the grid itself. This is the only service whose view
-  of a payment reflects its *current* state; `payment-api`'s own `payments`
-  row is stamped `INITIATED` at creation and never updated again, since it
-  has no Kafka consumer of its own.
-- `GET /api/ledger/{paymentId}` — the double-entry postings shown in the
-  drawer.
-- `GET /api/notifications/{paymentId}` — the notifications shown in the
-  drawer.
+- `GET /api/payments` — the grid itself, the current state of every payment.
+- `GET /api/payments/{paymentId}` — the detail drawer's ledger postings and
+  notifications, in one call.
 
-All three go through the [API Gateway](#api-gateway) at
-`http://localhost:8088` rather than each service's own port — the frontend
-knows one origin, and CORS is handled once at the gateway rather than
-per-controller. See `dashboard/README.md` for how to run it.
+Both go through the [API Gateway](#api-gateway) at `http://localhost:8088`
+rather than the service's own port — the frontend knows one origin, and CORS
+is handled once at the gateway rather than per-controller. See
+`dashboard/README.md` for how to run it.
 
 ## Security
 
-Every REST endpoint across the four services that expose one — `payment-api`,
-`saga-orchestrator`, `ledger-service`, `notification-service` — requires an
-`X-API-Key` header, checked by a shared `ApiKeyAuthFilter` in `common` that
+Every REST endpoint across the five services that expose one — `payment-api`,
+`saga-orchestrator`, `ledger-service`, `notification-service`,
+`read-model-service` — requires an `X-API-Key` header, checked by a shared
+`ApiKeyAuthFilter` in `common` that
 each service registers explicitly via its own `FilterRegistrationBean`
 (component scanning never crosses from `common` into a service's own base
 package, so this can't just be a `@Component` picked up automatically). The
@@ -498,9 +534,10 @@ locally.
 
 ## Status
 
-**Built — all 7 core services, including real compensation, plus a live dashboard:**
+**Built — all 8 core services, including real compensation, plus a live dashboard:**
 `payment-api`, `saga-orchestrator`, `fraud-service`, `funds-auth-service`,
-`ledger-service`, `settlement-service`, `notification-service`. The full
+`ledger-service`, `settlement-service`, `notification-service`,
+`read-model-service`. The full
 happy path works end to end — intake through fraud approval, funds
 authorization, ledger HOLD posting, settlement capture, a final
 double-entry ledger posting, and notifications to both parties, all the
@@ -520,7 +557,7 @@ redelivery (see [Resilience](#resilience)), [Load testing](#load-testing)
 gives k6 scripts to turn the design doc's capacity estimate into a measured
 number, funds-auth-service now cache-asides account balance in Redis
 behind a circuit breaker (see [Caching](#caching)), a Spring Cloud
-Gateway edge service now fronts the four REST-exposing services with
+Gateway edge service now fronts the REST-exposing services with
 centralized routing, auth, rate limiting, and CORS (see
 [API Gateway](#api-gateway)), payment-api now serves a live OpenAPI
 spec and Swagger UI (`/v3/api-docs`, `/swagger-ui/index.html`) generated
@@ -529,22 +566,27 @@ way `/actuator` is so the docs themselves are publicly browsable, and
 fraud-service now has a fourth `FraudRule` backed by a small hand-trained
 classifier, circuit-breaker-guarded so a down ML service degrades to the
 deterministic rules instead of blocking the saga (see
-[ML Fraud Risk Scorer](#ml-fraud-risk-scorer)), and every service now has
+[ML Fraud Risk Scorer](#ml-fraud-risk-scorer)), every service now has
 its own Dockerfile, so the whole stack runs via `docker compose up --build`
-with nothing but Docker installed (see [Containerization](#containerization)).
+with nothing but Docker installed (see [Containerization](#containerization)),
+and a dedicated [CQRS Read Model](#cqrs-read-model) service now projects
+`payment.events` into one denormalized view purpose-shaped for the
+dashboard, decoupled from the three write-side services' tables it used to
+query directly — which required enriching the ledger events and adding a
+small producer to notification-service (previously consumer-only) so the
+projection has full detail to work with, not just `paymentId`s.
 
 **Also on the roadmap** — the difference between a demo and something that
 reads as production-grade:
 - **Architecture Decision Records** — short docs on why Kafka over Pulsar, why orchestration over choreography
 - **Schema evolution discipline** — every future schema change ships as a new Flyway migration, never editing one already applied
-- **CQRS read model** — the design doc names this but it was never built: today the dashboard's read APIs (`GET /api/sagas`, `GET /api/ledger/{id}`, `GET /api/notifications/{id}`) each query their own service's primary write-side table directly, not a separate projection. A real CQRS read model would be a dedicated service subscribing to `payment.events`/`payment.commands`, building a denormalized table purpose-shaped for the dashboard's queries, asynchronously consistent with — and decoupled from — the write-side services' own transactional stores
 - **Event sourcing** — not used, and today's state model is the opposite of it: `PaymentSagaState.advanceTo()` and `Account.debit()`/`credit()` mutate a current-value column in place (`state`, `balanceCents`), guarded by `@Version` optimistic locking, rather than deriving state by folding over a persisted, replayable event log. Kafka's `payment.events`/`payment.commands` carry facts *between* services but aren't retained/replayable as each service's system of record — a service restarting with an empty database couldn't rebuild its state from them. Actually event-sourcing an aggregate (most naturally the saga state machine) would mean storing every state transition as an immutable event and computing `state` as a projection over them on read, rather than persisting `state` itself
 
 ## Ideas under discussion
 
 Rougher than the roadmap above — directions being considered, not committed to:
 
-- **Real velocity/behavioral features via a cross-service event** — the [ML Fraud Risk Scorer](#ml-fraud-risk-scorer)'s velocity/deviation features are computed from fraud-service's own local history, deliberately avoiding a synchronous call to funds-auth-service (which is Kafka-only by design). A fuller version would have funds-auth-service publish account-lifecycle events and let fraud-service build a local read model from them — more consistent with this project's event-driven style than adding a new synchronous REST call — could also double as infrastructure for the CQRS read model above, one feature store serving both the dashboard and fraud features.
+- **Real velocity/behavioral features via a cross-service event** — the [ML Fraud Risk Scorer](#ml-fraud-risk-scorer)'s velocity/deviation features are computed from fraud-service's own local history, deliberately avoiding a synchronous call to funds-auth-service (which is Kafka-only by design). A fuller version would have funds-auth-service publish account-lifecycle events and let fraud-service build a local read model from them — more consistent with this project's event-driven style than adding a new synchronous REST call — could also double as infrastructure for [read-model-service](#cqrs-read-model), one feature store serving both the dashboard and fraud features.
 - **LLM-generated fraud explanations, not decisions** — when fraud-service rejects a payment, turn the triggering rule + context into a human-readable reason for the notification/audit trail via an LLM call. Keeps the actual fraud call deterministic (ML/rules decide, LLM explains) — a real production pattern, and a clean small addition to notification-service once the ML scorer above exists to explain.
 - **AI-assisted compensation summaries** — same idea applied to the compensation path: when a payment lands on `COMPENSATED`, generate a plain-English incident summary from the saga timeline. Reuses the existing `/payments/{id}/timeline` endpoint.
 
@@ -637,6 +679,7 @@ cd funds-auth-service && mvn spring-boot:run   # :8084
 cd ledger-service && mvn spring-boot:run       # :8085
 cd settlement-service && mvn spring-boot:run   # :8086
 cd notification-service && mvn spring-boot:run # :8087
+cd read-model-service && mvn spring-boot:run   # :8089
 cd api-gateway && mvn spring-boot:run          # :8088
 
 # 4. (optional) Start the dashboard
@@ -650,11 +693,11 @@ requires only Docker Desktop, no local Java/Maven install:
 docker compose --profile docker up --build
 ```
 
-Builds and starts infra plus all 8 services from source. Same ports as
-Option A (`:8080`, `:8082`–`:8088`), so the dashboard and any curl testing
+Builds and starts infra plus all 9 services from source. Same ports as
+Option A (`:8080`, `:8082`–`:8089`), so the dashboard and any curl testing
 below work identically either way. `--profile docker` is required — a plain
 `docker compose up -d` (as used in Option A's step 1) intentionally starts
-infra only, so it doesn't unexpectedly try to build and start all 8 services
+infra only, so it doesn't unexpectedly try to build and start all 9 services
 too.
 
 Either way: Kafka UI is at http://localhost:8081 for browsing topics/messages
@@ -741,6 +784,15 @@ Check who got notified (both payer and payee on success; payer only on a
 ```bash
 docker exec payflow-postgres psql -U payflow -d notification \
   -c "SELECT payment_id, recipient, outcome, message FROM notifications;"
+```
+
+Check the [CQRS read model](#cqrs-read-model)'s own projection — should
+match `payment_saga_state` above once `read-model-service` catches up:
+
+```bash
+docker exec payflow-postgres psql -U payflow -d readmodel \
+  -c "SELECT payment_id, state FROM payment_view;"
+curl -H "X-API-Key: local-dev-api-key-change-me" http://localhost:8088/api/payments/<id>
 ```
 
 ## Tech stack

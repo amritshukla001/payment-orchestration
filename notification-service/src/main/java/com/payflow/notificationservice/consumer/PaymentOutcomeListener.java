@@ -2,7 +2,9 @@ package com.payflow.notificationservice.consumer;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.payflow.common.events.EventEnvelope;
+import com.payflow.common.events.NotificationSentEvent;
 import com.payflow.common.events.PaymentCompensatedEvent;
+import com.payflow.common.events.PaymentEventType;
 import com.payflow.common.events.PaymentFailedEvent;
 import com.payflow.common.events.PaymentSettledEvent;
 import com.payflow.notificationservice.domain.NotificationRecord;
@@ -16,6 +18,7 @@ import org.apache.kafka.clients.consumer.ConsumerRecord;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.kafka.annotation.KafkaListener;
+import org.springframework.kafka.core.KafkaTemplate;
 import org.springframework.kafka.support.Acknowledgment;
 import org.springframework.stereotype.Component;
 import org.springframework.transaction.annotation.Transactional;
@@ -35,16 +38,20 @@ import java.util.UUID;
 public class PaymentOutcomeListener {
 
     private static final Logger log = LoggerFactory.getLogger(PaymentOutcomeListener.class);
+    private static final String EVENTS_TOPIC = "payment.events";
 
     private final NotificationRecordRepository notificationRecordRepository;
     private final ProcessedEventRepository processedEventRepository;
+    private final KafkaTemplate<String, String> kafkaTemplate;
     private final ObjectMapper objectMapper;
 
     public PaymentOutcomeListener(NotificationRecordRepository notificationRecordRepository,
                                    ProcessedEventRepository processedEventRepository,
+                                   KafkaTemplate<String, String> kafkaTemplate,
                                    ObjectMapper objectMapper) {
         this.notificationRecordRepository = notificationRecordRepository;
         this.processedEventRepository = processedEventRepository;
+        this.kafkaTemplate = kafkaTemplate;
         this.objectMapper = objectMapper;
     }
 
@@ -98,8 +105,20 @@ public class PaymentOutcomeListener {
         log.info("Payment {} notification sent to payer only (COMPENSATED)", event.paymentId());
     }
 
-    private void notify(UUID paymentId, UUID accountId, Recipient recipient, Outcome outcome, String message) {
-        notificationRecordRepository.save(new NotificationRecord(
+    private void notify(UUID paymentId, UUID accountId, Recipient recipient, Outcome outcome, String message) throws Exception {
+        NotificationRecord record = notificationRecordRepository.save(new NotificationRecord(
                 UUID.randomUUID(), paymentId, accountId, recipient, outcome, message, Instant.now()));
+        publishSent(record);
+    }
+
+    private void publishSent(NotificationRecord record) throws Exception {
+        NotificationSentEvent event = new NotificationSentEvent(
+                record.getId(), record.getPaymentId(), record.getAccountId(),
+                record.getRecipient().name(), record.getOutcome().name(),
+                record.getMessage(), record.getSentAt());
+        EventEnvelope envelope = new EventEnvelope(
+                UUID.randomUUID(), record.getPaymentId(), PaymentEventType.NOTIFICATION_SENT.name(),
+                Instant.now(), objectMapper.valueToTree(event));
+        kafkaTemplate.send(EVENTS_TOPIC, record.getPaymentId().toString(), objectMapper.writeValueAsString(envelope)).get();
     }
 }

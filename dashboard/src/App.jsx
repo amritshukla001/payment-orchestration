@@ -6,7 +6,7 @@ import {
   themeQuartz,
   colorSchemeDark,
 } from "ag-grid-community";
-import { fetchSagas, fetchLedgerEntries, fetchNotifications } from "./api.js";
+import { fetchPayments, fetchPaymentDetail } from "./api.js";
 import { stateMeta } from "./states.js";
 import PaymentDrawer from "./PaymentDrawer.jsx";
 import "./App.css";
@@ -60,7 +60,7 @@ export default function App() {
 
   const load = useCallback(async () => {
     try {
-      const data = await fetchSagas();
+      const data = await fetchPayments();
       setSagas(data);
       setError(null);
       setLastRefreshed(new Date());
@@ -136,11 +136,8 @@ export default function App() {
   const openDetail = useCallback(async (saga) => {
     setSelected({ saga, ledger: null, notifications: null, error: null });
     try {
-      const [ledger, notifications] = await Promise.all([
-        fetchLedgerEntries(saga.paymentId),
-        fetchNotifications(saga.paymentId),
-      ]);
-      setSelected({ saga, ledger, notifications, error: null });
+      const detail = await fetchPaymentDetail(saga.paymentId);
+      setSelected({ saga: detail.payment, ledger: detail.ledgerEntries, notifications: detail.notifications, error: null });
     } catch (e) {
       setSelected({ saga, ledger: [], notifications: [], error: e.message });
     }
@@ -152,9 +149,9 @@ export default function App() {
         <div>
           <h1>PayFlow Ops Console</h1>
           <p className="console__subtitle">
-            Live view over the saga-orchestrator, ledger-service and
-            notification-service read APIs — no separate query database,
-            straight from each service's own Postgres.
+            Live view over read-model-service's CQRS projection — a
+            denormalized read model built from payment.events, decoupled
+            from each write-side service's own Postgres.
           </p>
         </div>
         <div className="console__meta">

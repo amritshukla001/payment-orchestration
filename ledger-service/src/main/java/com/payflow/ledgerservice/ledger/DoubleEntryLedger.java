@@ -12,7 +12,9 @@ import java.util.UUID;
  * Posts both legs of a payment's double entry: HOLD (debit payer, credit
  * suspense) at authorization time, FINAL (debit suspense, credit payee)
  * once settlement confirms capture. Every posting is a new row; nothing
- * here is ever updated.
+ * here is ever updated. Each method returns the posted entry -- on
+ * redelivery this is the already-existing row, not a new one, so a caller
+ * publishing an event off the return value stays correct either way.
  */
 @Component
 public class DoubleEntryLedger {
@@ -28,30 +30,24 @@ public class DoubleEntryLedger {
         this.ledgerEntryRepository = ledgerEntryRepository;
     }
 
-    public void postHold(UUID paymentId, UUID payerAccount, long amountCents) {
-        if (ledgerEntryRepository.existsByPaymentIdAndPostingType(paymentId, PostingType.HOLD)) {
-            return; // already posted — safe no-op on redelivery
-        }
-        ledgerEntryRepository.save(new LedgerEntry(
-                UUID.randomUUID(), paymentId, payerAccount, SUSPENSE_ACCOUNT,
-                amountCents, PostingType.HOLD, Instant.now()));
+    public LedgerEntry postHold(UUID paymentId, UUID payerAccount, long amountCents) {
+        return ledgerEntryRepository.findByPaymentIdAndPostingType(paymentId, PostingType.HOLD)
+                .orElseGet(() -> ledgerEntryRepository.save(new LedgerEntry(
+                        UUID.randomUUID(), paymentId, payerAccount, SUSPENSE_ACCOUNT,
+                        amountCents, PostingType.HOLD, Instant.now())));
     }
 
-    public void postFinal(UUID paymentId, UUID payeeAccount, long amountCents) {
-        if (ledgerEntryRepository.existsByPaymentIdAndPostingType(paymentId, PostingType.FINAL)) {
-            return; // already posted — safe no-op on redelivery
-        }
-        ledgerEntryRepository.save(new LedgerEntry(
-                UUID.randomUUID(), paymentId, SUSPENSE_ACCOUNT, payeeAccount,
-                amountCents, PostingType.FINAL, Instant.now()));
+    public LedgerEntry postFinal(UUID paymentId, UUID payeeAccount, long amountCents) {
+        return ledgerEntryRepository.findByPaymentIdAndPostingType(paymentId, PostingType.FINAL)
+                .orElseGet(() -> ledgerEntryRepository.save(new LedgerEntry(
+                        UUID.randomUUID(), paymentId, SUSPENSE_ACCOUNT, payeeAccount,
+                        amountCents, PostingType.FINAL, Instant.now())));
     }
 
-    public void reverseHold(UUID paymentId, UUID payerAccount, long amountCents) {
-        if (ledgerEntryRepository.existsByPaymentIdAndPostingType(paymentId, PostingType.REVERSAL)) {
-            return; // already posted — safe no-op on redelivery
-        }
-        ledgerEntryRepository.save(new LedgerEntry(
-                UUID.randomUUID(), paymentId, SUSPENSE_ACCOUNT, payerAccount,
-                amountCents, PostingType.REVERSAL, Instant.now()));
+    public LedgerEntry reverseHold(UUID paymentId, UUID payerAccount, long amountCents) {
+        return ledgerEntryRepository.findByPaymentIdAndPostingType(paymentId, PostingType.REVERSAL)
+                .orElseGet(() -> ledgerEntryRepository.save(new LedgerEntry(
+                        UUID.randomUUID(), paymentId, SUSPENSE_ACCOUNT, payerAccount,
+                        amountCents, PostingType.REVERSAL, Instant.now())));
     }
 }

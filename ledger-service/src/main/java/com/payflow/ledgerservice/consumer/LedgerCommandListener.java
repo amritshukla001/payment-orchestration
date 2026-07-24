@@ -9,6 +9,7 @@ import com.payflow.common.events.LedgerFinalizedEvent;
 import com.payflow.common.events.LedgerPostedEvent;
 import com.payflow.common.events.LedgerReversedEvent;
 import com.payflow.common.events.PaymentEventType;
+import com.payflow.ledgerservice.domain.LedgerEntry;
 import com.payflow.ledgerservice.domain.ProcessedEvent;
 import com.payflow.ledgerservice.ledger.DoubleEntryLedger;
 import com.payflow.ledgerservice.repository.ProcessedEventRepository;
@@ -75,22 +76,28 @@ public class LedgerCommandListener {
 
     private void handlePostLedger(EventEnvelope envelope) throws Exception {
         PostLedgerCommand command = objectMapper.treeToValue(envelope.payload(), PostLedgerCommand.class);
-        ledger.postHold(command.paymentId(), command.payerAccount(), command.amountCents());
-        publish(command.paymentId(), PaymentEventType.LEDGER_POSTED, new LedgerPostedEvent(command.paymentId(), Instant.now()));
+        LedgerEntry entry = ledger.postHold(command.paymentId(), command.payerAccount(), command.amountCents());
+        publish(command.paymentId(), PaymentEventType.LEDGER_POSTED, new LedgerPostedEvent(
+                entry.getId(), entry.getPaymentId(), entry.getDebitAccount(), entry.getCreditAccount(),
+                entry.getAmountCents(), entry.getPostingType().name(), entry.getPostedAt()));
         log.info("Payment {} ledger HOLD posted", command.paymentId());
     }
 
     private void handlePostFinalLedger(EventEnvelope envelope) throws Exception {
         PostFinalLedgerCommand command = objectMapper.treeToValue(envelope.payload(), PostFinalLedgerCommand.class);
-        ledger.postFinal(command.paymentId(), command.payeeAccount(), command.amountCents());
-        publish(command.paymentId(), PaymentEventType.LEDGER_FINALIZED, new LedgerFinalizedEvent(command.paymentId(), Instant.now()));
+        LedgerEntry entry = ledger.postFinal(command.paymentId(), command.payeeAccount(), command.amountCents());
+        publish(command.paymentId(), PaymentEventType.LEDGER_FINALIZED, new LedgerFinalizedEvent(
+                entry.getId(), entry.getPaymentId(), entry.getDebitAccount(), entry.getCreditAccount(),
+                entry.getAmountCents(), entry.getPostingType().name(), entry.getPostedAt()));
         log.info("Payment {} ledger FINAL posted", command.paymentId());
     }
 
     private void handleReverseLedger(EventEnvelope envelope) throws Exception {
         ReverseLedgerCommand command = objectMapper.treeToValue(envelope.payload(), ReverseLedgerCommand.class);
-        ledger.reverseHold(command.paymentId(), command.payerAccount(), command.amountCents());
-        publish(command.paymentId(), PaymentEventType.LEDGER_REVERSED, new LedgerReversedEvent(command.paymentId(), Instant.now()));
+        LedgerEntry entry = ledger.reverseHold(command.paymentId(), command.payerAccount(), command.amountCents());
+        publish(command.paymentId(), PaymentEventType.LEDGER_REVERSED, new LedgerReversedEvent(
+                entry.getId(), entry.getPaymentId(), entry.getDebitAccount(), entry.getCreditAccount(),
+                entry.getAmountCents(), entry.getPostingType().name(), entry.getPostedAt()));
         log.info("Payment {} ledger HOLD reversed (compensation)", command.paymentId());
     }
 

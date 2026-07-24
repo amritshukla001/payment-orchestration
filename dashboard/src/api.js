@@ -17,14 +17,15 @@ async function getJson(url) {
   return res.json();
 }
 
-export function fetchSagas() {
-  return getJson(`${GATEWAY_URL}/api/sagas`);
+// Backed by read-model-service's CQRS projection, not saga-orchestrator's
+// own table -- one denormalized view built from payment.events.
+export function fetchPayments() {
+  return getJson(`${GATEWAY_URL}/api/payments`);
 }
 
-export function fetchLedgerEntries(paymentId) {
-  return getJson(`${GATEWAY_URL}/api/ledger/${paymentId}`);
-}
-
-export function fetchNotifications(paymentId) {
-  return getJson(`${GATEWAY_URL}/api/notifications/${paymentId}`);
+// One call for the whole detail drawer (payment + ledger entries +
+// notifications), where this used to be two separate calls into
+// ledger-service and notification-service.
+export function fetchPaymentDetail(paymentId) {
+  return getJson(`${GATEWAY_URL}/api/payments/${paymentId}`);
 }

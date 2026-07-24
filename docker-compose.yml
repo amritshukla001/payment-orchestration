@@ -209,6 +209,22 @@ services:
       kafka:
         condition: service_healthy
 
+  read-model-service:
+    profiles: ["docker"]
+    build:
+      context: .
+      dockerfile: read-model-service/Dockerfile
+    container_name: payflow-read-model-service
+    ports:
+      - "8089:8089"
+    environment:
+      SPRING_PROFILES_ACTIVE: docker
+    depends_on:
+      postgres:
+        condition: service_healthy
+      kafka:
+        condition: service_healthy
+
   api-gateway:
     profiles: ["docker"]
     build:

@@ -3,6 +3,7 @@ package com.payflow.notificationservice.consumer;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.datatype.jsr310.JavaTimeModule;
 import com.payflow.common.events.EventEnvelope;
+import com.payflow.common.events.NotificationSentEvent;
 import com.payflow.common.events.PaymentCompensatedEvent;
 import com.payflow.common.events.PaymentFailedEvent;
 import com.payflow.common.events.PaymentSettledEvent;
@@ -18,16 +19,19 @@ import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.ArgumentCaptor;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
+import org.springframework.kafka.core.KafkaTemplate;
 import org.springframework.kafka.support.Acknowledgment;
 
 import java.time.Instant;
 import java.util.List;
 import java.util.Map;
 import java.util.UUID;
+import java.util.concurrent.CompletableFuture;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.Mockito.*;
 
 @ExtendWith(MockitoExtension.class)
@@ -38,6 +42,8 @@ class PaymentOutcomeListenerTest {
     @Mock
     private ProcessedEventRepository processedEventRepository;
     @Mock
+    private KafkaTemplate<String, String> kafkaTemplate;
+    @Mock
     private Acknowledgment ack;
 
     private ObjectMapper objectMapper;
@@ -46,7 +52,10 @@ class PaymentOutcomeListenerTest {
     @BeforeEach
     void setUp() {
         objectMapper = new ObjectMapper().registerModule(new JavaTimeModule());
-        listener = new PaymentOutcomeListener(notificationRecordRepository, processedEventRepository, objectMapper);
+        listener = new PaymentOutcomeListener(notificationRecordRepository, processedEventRepository, kafkaTemplate, objectMapper);
+        lenient().when(notificationRecordRepository.save(any())).thenAnswer(inv -> inv.getArgument(0));
+        lenient().when(kafkaTemplate.send(anyString(), anyString(), anyString()))
+                .thenReturn(CompletableFuture.completedFuture(null));
     }
 
     @Test
@@ -68,7 +77,28 @@ class PaymentOutcomeListenerTest {
         assertThat(saved).extracting(NotificationRecord::getAccountId)
                 .containsExactlyInAnyOrder(payerAccount, payeeAccount);
 
+        verify(kafkaTemplate, times(2)).send(eq("payment.events"), eq(paymentId.toString()), anyString());
         verify(ack).acknowledge();
+    }
+
+    @Test
+    void publishesNotificationSentAfterEachNotificationIsRecorded() throws Exception {
+        UUID paymentId = UUID.randomUUID();
+        UUID payerAccount = UUID.randomUUID();
+        PaymentFailedEvent event = new PaymentFailedEvent(paymentId, payerAccount, "over threshold", Instant.now());
+
+        listener.onEvent(recordFor(paymentId, "PAYMENT_FAILED", event), ack);
+
+        ArgumentCaptor<String> jsonCaptor = ArgumentCaptor.forClass(String.class);
+        verify(kafkaTemplate).send(eq("payment.events"), eq(paymentId.toString()), jsonCaptor.capture());
+        EventEnvelope published = objectMapper.readValue(jsonCaptor.getValue(), EventEnvelope.class);
+        assertThat(published.eventType()).isEqualTo("NOTIFICATION_SENT");
+        NotificationSentEvent sent = objectMapper.treeToValue(published.payload(), NotificationSentEvent.class);
+        assertThat(sent.paymentId()).isEqualTo(paymentId);
+        assertThat(sent.accountId()).isEqualTo(payerAccount);
+        assertThat(sent.recipient()).isEqualTo("PAYER");
+        assertThat(sent.outcome()).isEqualTo("FAILURE");
+        assertThat(sent.message()).contains("over threshold");
     }
 
     @Test
@@ -118,6 +148,7 @@ class PaymentOutcomeListenerTest {
         listener.onEvent(record, ack);
 
         verifyNoInteractions(notificationRecordRepository);
+        verifyNoInteractions(kafkaTemplate);
         verify(ack).acknowledge();
     }
 
@@ -132,6 +163,7 @@ class PaymentOutcomeListenerTest {
         listener.onEvent(record, ack);
 
         verifyNoInteractions(notificationRecordRepository);
+        verifyNoInteractions(kafkaTemplate);
         verify(ack).acknowledge();
     }
 

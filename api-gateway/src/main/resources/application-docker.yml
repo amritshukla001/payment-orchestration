@@ -41,6 +41,10 @@ spring:
           uri: http://notification-service:8087
           predicates:
             - Path=/api/notifications/**
+        - id: read-model-service
+          uri: http://read-model-service:8089
+          predicates:
+            - Path=/api/payments/**
 
 management:
   zipkin:

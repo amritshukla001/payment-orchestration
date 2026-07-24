@@ -43,6 +43,7 @@
     <module>ledger-service</module>
     <module>settlement-service</module>
     <module>notification-service</module>
+    <module>read-model-service</module>
     <module>api-gateway</module>
   </modules>
 

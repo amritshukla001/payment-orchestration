@@ -156,7 +156,8 @@ class PaymentEventListenerTest {
         when(sagaStateRepository.findById(paymentId)).thenReturn(Optional.of(existing));
 
         listener.onEvent(recordFor(paymentId, PaymentEventType.LEDGER_POSTED,
-                new LedgerPostedEvent(paymentId, Instant.now())), ack);
+                new LedgerPostedEvent(UUID.randomUUID(), paymentId, UUID.randomUUID(), UUID.randomUUID(),
+                        5_000L, "HOLD", Instant.now())), ack);
 
         assertThat(existing.getState()).isEqualTo(PaymentState.LEDGER_POSTED);
         SettleCommand command = capturedCommand(paymentId, "SETTLE", SettleCommand.class);
@@ -184,7 +185,8 @@ class PaymentEventListenerTest {
         // all -- it's a pure audit-log signal, so no findById should even happen.
 
         listener.onEvent(recordFor(paymentId, PaymentEventType.LEDGER_FINALIZED,
-                new LedgerFinalizedEvent(paymentId, Instant.now())), ack);
+                new LedgerFinalizedEvent(UUID.randomUUID(), paymentId, UUID.randomUUID(), UUID.randomUUID(),
+                        5_000L, "FINAL", Instant.now())), ack);
 
         verifyNoInteractions(sagaStateRepository);
         verifyNoInteractions(kafkaTemplate);
@@ -213,7 +215,8 @@ class PaymentEventListenerTest {
         when(sagaStateRepository.findById(paymentId)).thenReturn(Optional.of(existing));
 
         listener.onEvent(recordFor(paymentId, PaymentEventType.LEDGER_REVERSED,
-                new LedgerReversedEvent(paymentId, Instant.now())), ack);
+                new LedgerReversedEvent(UUID.randomUUID(), paymentId, UUID.randomUUID(), UUID.randomUUID(),
+                        5_000L, "REVERSAL", Instant.now())), ack);
 
         // Compensation isn't complete yet -- releasing funds is the second
         // half, so the state must not jump to COMPENSATED prematurely.
@@ -251,7 +254,8 @@ class PaymentEventListenerTest {
         assertThat(existing.getState()).isEqualTo(PaymentState.COMPENSATING);
 
         listener.onEvent(recordFor(paymentId, PaymentEventType.LEDGER_REVERSED,
-                new LedgerReversedEvent(paymentId, Instant.now())), ack);
+                new LedgerReversedEvent(UUID.randomUUID(), paymentId, UUID.randomUUID(), UUID.randomUUID(),
+                        5_000L, "REVERSAL", Instant.now())), ack);
         assertThat(existing.getState()).isEqualTo(PaymentState.COMPENSATING);
 
         listener.onEvent(recordFor(paymentId, PaymentEventType.FUNDS_RELEASED,

@@ -3,5 +3,16 @@ package com.payflow.common.events;
 import java.time.Instant;
 import java.util.UUID;
 
-public record LedgerReversedEvent(UUID paymentId, Instant occurredAt) {
+/**
+ * Carries the full posted entry, not just paymentId -- see LedgerPostedEvent.
+ */
+public record LedgerReversedEvent(
+        UUID id,
+        UUID paymentId,
+        UUID debitAccount,
+        UUID creditAccount,
+        long amountCents,
+        String postingType,
+        Instant occurredAt
+) {
 }

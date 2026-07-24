@@ -9,6 +9,7 @@ COPY funds-auth-service/pom.xml funds-auth-service/pom.xml
 COPY ledger-service/pom.xml ledger-service/pom.xml
 COPY settlement-service/pom.xml settlement-service/pom.xml
 COPY notification-service/pom.xml notification-service/pom.xml
+COPY read-model-service/pom.xml read-model-service/pom.xml
 COPY api-gateway/pom.xml api-gateway/pom.xml
 RUN mvn -B -pl ledger-service -am dependency:go-offline
 COPY common/src common/src
