@@ -176,6 +176,33 @@
   font-size: 0.85rem;
 }
 
+.drawer__generate {
+  background: color-mix(in srgb, var(--accent) 14%, transparent);
+  border: 1px solid color-mix(in srgb, var(--accent) 40%, transparent);
+  border-radius: 6px;
+  color: var(--accent);
+  font-size: 0.8rem;
+  font-weight: 600;
+  padding: 6px 14px;
+  cursor: pointer;
+}
+.drawer__generate:hover {
+  background: color-mix(in srgb, var(--accent) 24%, transparent);
+}
+
+.drawer__summary {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 8px;
+}
+
+.drawer__summary-text {
+  font-size: 0.85rem;
+  line-height: 1.5;
+  margin: 0;
+}
+
 .drawer__table {
   width: 100%;
   border-collapse: collapse;

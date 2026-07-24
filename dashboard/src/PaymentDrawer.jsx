@@ -1,4 +1,6 @@
+import { useState } from "react";
 import { stateMeta } from "./states.js";
+import { fetchSagaSummary } from "./api.js";
 
 function centsToAmount(cents, currency) {
   return new Intl.NumberFormat("en-US", {
@@ -18,6 +20,47 @@ function OutcomeBadge({ outcome }) {
   const tone =
     outcome === "SUCCESS" ? "success" : outcome === "REVERSED" ? "reversed" : "danger";
   return <span className={`badge badge--${tone}`}>{outcome}</span>;
+}
+
+// Only offered for COMPENSATED payments -- an on-demand, human-triggered
+// LLM call that explains the saga's history; it never decides anything.
+// The source badge is honest about which path produced the text: the
+// Claude API, or the server's deterministic fallback template.
+function IncidentSummary({ paymentId }) {
+  const [state, setState] = useState({ status: "idle", summary: null, error: null });
+
+  const generate = async () => {
+    setState({ status: "loading", summary: null, error: null });
+    try {
+      const summary = await fetchSagaSummary(paymentId);
+      setState({ status: "done", summary, error: null });
+    } catch (e) {
+      setState({ status: "error", summary: null, error: e.message });
+    }
+  };
+
+  return (
+    <section className="drawer__section">
+      <h3>Incident summary</h3>
+      {state.status === "idle" && (
+        <button className="drawer__generate" onClick={generate}>
+          Generate summary
+        </button>
+      )}
+      {state.status === "loading" && <p className="drawer__empty">Generating…</p>}
+      {state.status === "error" && <p className="status status--error">{state.error}</p>}
+      {state.status === "done" && (
+        <div className="drawer__summary">
+          <span
+            className={`badge badge--${state.summary.source === "AI" ? "inflight" : "warning"}`}
+          >
+            {state.summary.source === "AI" ? "AI" : "FALLBACK"}
+          </span>
+          <p className="drawer__summary-text">{state.summary.summary}</p>
+        </div>
+      )}
+    </section>
+  );
 }
 
 export default function PaymentDrawer({ state, onClose }) {
@@ -99,6 +142,8 @@ export default function PaymentDrawer({ state, onClose }) {
             </table>
           )}
         </section>
+
+        {saga.state === "COMPENSATED" && <IncidentSummary paymentId={saga.paymentId} />}
 
         <section className="drawer__section">
           <h3>Notifications</h3>

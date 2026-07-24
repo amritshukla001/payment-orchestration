@@ -29,3 +29,11 @@ export function fetchPayments() {
 export function fetchPaymentDetail(paymentId) {
   return getJson(`${GATEWAY_URL}/api/payments/${paymentId}`);
 }
+
+// AI-generated incident summary for a COMPENSATED payment, served by
+// saga-orchestrator from its own event-sourced saga log. Generated once
+// and cached server-side; falls back to a deterministic template when the
+// Claude API is unavailable (response.source says which).
+export function fetchSagaSummary(paymentId) {
+  return getJson(`${GATEWAY_URL}/api/sagas/${paymentId}/summary`);
+}

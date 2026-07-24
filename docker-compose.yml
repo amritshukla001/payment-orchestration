@@ -121,6 +121,9 @@ services:
       - "8082:8082"
     environment:
       SPRING_PROFILES_ACTIVE: docker
+      # Optional -- without it the compensation-summary endpoint serves its
+      # deterministic fallback instead of calling the Claude API.
+      ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:-}
     depends_on:
       postgres:
         condition: service_healthy

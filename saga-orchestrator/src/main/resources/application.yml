@@ -42,7 +42,19 @@ resilience4j:
         wait-duration: 200ms
         enable-exponential-backoff: true
         exponential-backoff-multiplier: 2
+  circuitbreaker:
+    instances:
+      ai-summarizer:
+        sliding-window-size: 10
+        failure-rate-threshold: 50
+        wait-duration-in-open-state: 5s
+        permitted-number-of-calls-in-half-open-state: 3
 
 payflow:
   security:
     api-key: ${PAYFLOW_API_KEY:local-dev-api-key-change-me}
+  ai:
+    # Empty default is a normal local-dev state: the summary endpoint then
+    # serves the deterministic fallback instead of calling the Claude API.
+    api-key: ${ANTHROPIC_API_KEY:}
+    model: claude-opus-4-8
