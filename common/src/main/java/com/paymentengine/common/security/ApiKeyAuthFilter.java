@@ -1,4 +1,4 @@
-package com.payflow.common.security;
+package com.paymentengine.common.security;
 
 import jakarta.servlet.FilterChain;
 import jakarta.servlet.ServletException;
@@ -12,7 +12,7 @@ import java.util.List;
 /**
  * Shared across every service's own Spring context (registered explicitly
  * via each service's own FilterRegistrationBean, since component scanning
- * never crosses from com.payflow.common into a service's own base package).
+ * never crosses from com.paymentengine.common into a service's own base package).
  * Deliberately simple -- a single static key checked against one header --
  * since the point is demonstrating the auth-boundary concept, not building
  * a credential-management system.

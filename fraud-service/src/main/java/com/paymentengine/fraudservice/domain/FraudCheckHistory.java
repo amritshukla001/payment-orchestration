@@ -1,4 +1,4 @@
-package com.payflow.fraudservice.domain;
+package com.paymentengine.fraudservice.domain;
 
 import jakarta.persistence.Column;
 import jakarta.persistence.Entity;

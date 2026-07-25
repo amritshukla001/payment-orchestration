@@ -43,6 +43,6 @@ resilience4j:
         enable-exponential-backoff: true
         exponential-backoff-multiplier: 2
 
-payflow:
+paymentengine:
   security:
-    api-key: ${PAYFLOW_API_KEY:local-dev-api-key-change-me}
+    api-key: ${PAYMENTENGINE_API_KEY:local-dev-api-key-change-me}

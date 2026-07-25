@@ -1,6 +1,6 @@
-package com.payflow.complianceservice.repository;
+package com.paymentengine.complianceservice.repository;
 
-import com.payflow.complianceservice.domain.RegulatoryReport;
+import com.paymentengine.complianceservice.domain.RegulatoryReport;
 import org.springframework.data.jpa.repository.JpaRepository;
 import java.util.UUID;
 

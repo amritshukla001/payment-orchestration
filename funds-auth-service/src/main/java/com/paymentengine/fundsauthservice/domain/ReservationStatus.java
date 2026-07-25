@@ -1,4 +1,4 @@
-package com.payflow.fundsauthservice.domain;
+package com.paymentengine.fundsauthservice.domain;
 
 public enum ReservationStatus {
     RESERVED,

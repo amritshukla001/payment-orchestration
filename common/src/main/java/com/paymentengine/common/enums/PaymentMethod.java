@@ -1,4 +1,4 @@
-package com.payflow.common.enums;
+package com.paymentengine.common.enums;
 
 /**
  * How the payer is funding a payment. Compliance requirements differ by

@@ -1,4 +1,4 @@
-package com.payflow.ledgerservice.domain;
+package com.paymentengine.ledgerservice.domain;
 
 /**
  * HOLD is posted when funds move from payer to the suspense account

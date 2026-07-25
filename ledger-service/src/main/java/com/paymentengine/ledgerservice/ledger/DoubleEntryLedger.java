@@ -1,8 +1,8 @@
-package com.payflow.ledgerservice.ledger;
+package com.paymentengine.ledgerservice.ledger;
 
-import com.payflow.ledgerservice.domain.LedgerEntry;
-import com.payflow.ledgerservice.domain.PostingType;
-import com.payflow.ledgerservice.repository.LedgerEntryRepository;
+import com.paymentengine.ledgerservice.domain.LedgerEntry;
+import com.paymentengine.ledgerservice.domain.PostingType;
+import com.paymentengine.ledgerservice.repository.LedgerEntryRepository;
 import org.springframework.stereotype.Component;
 
 import java.time.Instant;

@@ -1,6 +1,6 @@
-package com.payflow.ledgerservice.repository;
+package com.paymentengine.ledgerservice.repository;
 
-import com.payflow.ledgerservice.domain.ProcessedEvent;
+import com.paymentengine.ledgerservice.domain.ProcessedEvent;
 import org.springframework.data.jpa.repository.JpaRepository;
 import java.util.UUID;
 

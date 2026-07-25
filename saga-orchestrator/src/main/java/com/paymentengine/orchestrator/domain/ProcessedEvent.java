@@ -1,4 +1,4 @@
-package com.payflow.orchestrator.domain;
+package com.paymentengine.orchestrator.domain;
 
 import jakarta.persistence.Column;
 import jakarta.persistence.Entity;

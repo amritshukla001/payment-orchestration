@@ -1,7 +1,7 @@
-package com.payflow.ledgerservice.api;
+package com.paymentengine.ledgerservice.api;
 
-import com.payflow.ledgerservice.api.dto.LedgerEntryResponse;
-import com.payflow.ledgerservice.repository.LedgerEntryRepository;
+import com.paymentengine.ledgerservice.api.dto.LedgerEntryResponse;
+import com.paymentengine.ledgerservice.repository.LedgerEntryRepository;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.tags.Tag;
 import org.springframework.web.bind.annotation.GetMapping;

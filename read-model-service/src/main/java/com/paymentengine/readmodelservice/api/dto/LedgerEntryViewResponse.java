@@ -1,6 +1,6 @@
-package com.payflow.readmodelservice.api.dto;
+package com.paymentengine.readmodelservice.api.dto;
 
-import com.payflow.readmodelservice.domain.LedgerEntryView;
+import com.paymentengine.readmodelservice.domain.LedgerEntryView;
 
 import java.time.Instant;
 import java.util.UUID;

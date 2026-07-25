@@ -1,7 +1,7 @@
-package com.payflow.paymentapi.domain;
+package com.paymentengine.paymentapi.domain;
 
-import com.payflow.common.enums.PaymentMethod;
-import com.payflow.common.enums.PaymentState;
+import com.paymentengine.common.enums.PaymentMethod;
+import com.paymentengine.common.enums.PaymentState;
 import jakarta.persistence.*;
 import java.time.Instant;
 import java.util.UUID;

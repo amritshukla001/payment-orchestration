@@ -1,4 +1,4 @@
-package com.payflow.fraudservice.rules;
+package com.paymentengine.fraudservice.rules;
 
 public record Verdict(boolean approved, String reason) {
     public static Verdict approve() {

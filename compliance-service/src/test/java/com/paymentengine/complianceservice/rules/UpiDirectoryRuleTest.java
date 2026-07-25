@@ -1,9 +1,9 @@
-package com.payflow.complianceservice.rules;
+package com.paymentengine.complianceservice.rules;
 
-import com.payflow.common.commands.CheckComplianceCommand;
-import com.payflow.common.enums.PaymentMethod;
-import com.payflow.complianceservice.domain.UpiRegistration;
-import com.payflow.complianceservice.repository.UpiRegistrationRepository;
+import com.paymentengine.common.commands.CheckComplianceCommand;
+import com.paymentengine.common.enums.PaymentMethod;
+import com.paymentengine.complianceservice.domain.UpiRegistration;
+import com.paymentengine.complianceservice.repository.UpiRegistrationRepository;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;

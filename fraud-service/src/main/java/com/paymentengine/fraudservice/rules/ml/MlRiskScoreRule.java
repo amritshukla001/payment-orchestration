@@ -1,9 +1,9 @@
-package com.payflow.fraudservice.rules.ml;
+package com.paymentengine.fraudservice.rules.ml;
 
-import com.payflow.common.commands.CheckFraudCommand;
-import com.payflow.fraudservice.domain.FraudCheckHistory;
-import com.payflow.fraudservice.repository.FraudCheckHistoryRepository;
-import com.payflow.fraudservice.rules.FraudRule;
+import com.paymentengine.common.commands.CheckFraudCommand;
+import com.paymentengine.fraudservice.domain.FraudCheckHistory;
+import com.paymentengine.fraudservice.repository.FraudCheckHistoryRepository;
+import com.paymentengine.fraudservice.rules.FraudRule;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.core.annotation.Order;
 import org.springframework.stereotype.Component;

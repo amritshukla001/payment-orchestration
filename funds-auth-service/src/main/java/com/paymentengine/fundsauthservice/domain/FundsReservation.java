@@ -1,4 +1,4 @@
-package com.payflow.fundsauthservice.domain;
+package com.paymentengine.fundsauthservice.domain;
 
 import jakarta.persistence.*;
 import java.time.Instant;

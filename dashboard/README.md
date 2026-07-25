@@ -1,6 +1,6 @@
-# PayFlow Ops Console
+# Payment Processing Engine Ops Console
 
-A read-only React + AG Grid dashboard over the running payment-orchestration
+A read-only React + AG Grid dashboard over the running payment-processing-engine
 services. It polls `read-model-service`'s CQRS read model through the API
 Gateway (`http://localhost:8088`, see the root README's
 [API Gateway](../README.md#api-gateway) section) — a denormalized

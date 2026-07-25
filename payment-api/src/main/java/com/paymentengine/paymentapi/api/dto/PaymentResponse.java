@@ -1,6 +1,6 @@
-package com.payflow.paymentapi.api.dto;
+package com.paymentengine.paymentapi.api.dto;
 
-import com.payflow.paymentapi.domain.Payment;
+import com.paymentengine.paymentapi.domain.Payment;
 import java.time.Instant;
 import java.util.UUID;
 

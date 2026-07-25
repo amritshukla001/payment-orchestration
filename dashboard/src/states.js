@@ -1,4 +1,4 @@
-// Mirrors com.payflow.common.enums.PaymentState. Grouped by what the
+// Mirrors com.paymentengine.common.enums.PaymentState. Grouped by what the
 // state means for the payer/payee, not just alphabetically.
 export const STATE_META = {
   INITIATED: { label: "Initiated", tone: "inflight" },

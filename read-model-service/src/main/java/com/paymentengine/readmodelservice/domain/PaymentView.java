@@ -1,6 +1,6 @@
-package com.payflow.readmodelservice.domain;
+package com.paymentengine.readmodelservice.domain;
 
-import com.payflow.common.enums.PaymentState;
+import com.paymentengine.common.enums.PaymentState;
 import jakarta.persistence.*;
 import java.time.Instant;
 import java.util.UUID;

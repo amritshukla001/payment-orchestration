@@ -1,4 +1,4 @@
-package com.payflow.readmodelservice.domain;
+package com.paymentengine.readmodelservice.domain;
 
 import jakarta.persistence.Column;
 import jakarta.persistence.Entity;

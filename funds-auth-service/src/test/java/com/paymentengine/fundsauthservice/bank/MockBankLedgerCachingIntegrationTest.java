@@ -1,7 +1,7 @@
-package com.payflow.fundsauthservice.bank;
+package com.paymentengine.fundsauthservice.bank;
 
-import com.payflow.fundsauthservice.domain.Account;
-import com.payflow.fundsauthservice.repository.AccountRepository;
+import com.paymentengine.fundsauthservice.domain.Account;
+import com.paymentengine.fundsauthservice.repository.AccountRepository;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;

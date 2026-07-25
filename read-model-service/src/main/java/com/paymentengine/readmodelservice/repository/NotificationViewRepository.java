@@ -1,6 +1,6 @@
-package com.payflow.readmodelservice.repository;
+package com.paymentengine.readmodelservice.repository;
 
-import com.payflow.readmodelservice.domain.NotificationView;
+import com.paymentengine.readmodelservice.domain.NotificationView;
 import org.springframework.data.jpa.repository.JpaRepository;
 import java.util.List;
 import java.util.UUID;

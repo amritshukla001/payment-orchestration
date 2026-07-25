@@ -1,4 +1,4 @@
-package com.payflow.paymentapi;
+package com.paymentengine.paymentapi;
 
 import org.apache.kafka.clients.consumer.ConsumerConfig;
 import org.apache.kafka.clients.consumer.ConsumerRecord;
@@ -58,7 +58,7 @@ class PaymentApiIntegrationTest {
         registry.add("spring.datasource.username", postgres::getUsername);
         registry.add("spring.datasource.password", postgres::getPassword);
         registry.add("spring.kafka.bootstrap-servers", kafka::getBootstrapServers);
-        registry.add("payflow.security.api-key", () -> API_KEY);
+        registry.add("paymentengine.security.api-key", () -> API_KEY);
     }
 
     @Autowired

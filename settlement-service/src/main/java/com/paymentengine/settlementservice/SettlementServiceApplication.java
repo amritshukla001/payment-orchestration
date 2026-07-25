@@ -1,4 +1,4 @@
-package com.payflow.settlementservice;
+package com.paymentengine.settlementservice;
 
 import org.springframework.boot.SpringApplication;
 import org.springframework.boot.autoconfigure.SpringBootApplication;

@@ -1,13 +1,13 @@
-package com.payflow.complianceservice.api;
+package com.paymentengine.complianceservice.api;
 
-import com.payflow.complianceservice.api.dto.KycRecordResponse;
-import com.payflow.complianceservice.api.dto.RegulatoryReportResponse;
-import com.payflow.complianceservice.api.dto.UpiRegistrationResponse;
-import com.payflow.complianceservice.domain.KycRecord;
-import com.payflow.complianceservice.domain.UpiRegistration;
-import com.payflow.complianceservice.repository.KycRecordRepository;
-import com.payflow.complianceservice.repository.RegulatoryReportRepository;
-import com.payflow.complianceservice.repository.UpiRegistrationRepository;
+import com.paymentengine.complianceservice.api.dto.KycRecordResponse;
+import com.paymentengine.complianceservice.api.dto.RegulatoryReportResponse;
+import com.paymentengine.complianceservice.api.dto.UpiRegistrationResponse;
+import com.paymentengine.complianceservice.domain.KycRecord;
+import com.paymentengine.complianceservice.domain.UpiRegistration;
+import com.paymentengine.complianceservice.repository.KycRecordRepository;
+import com.paymentengine.complianceservice.repository.RegulatoryReportRepository;
+import com.paymentengine.complianceservice.repository.UpiRegistrationRepository;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.tags.Tag;
 import org.springframework.web.bind.annotation.*;

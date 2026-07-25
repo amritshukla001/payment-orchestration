@@ -1,6 +1,6 @@
-package com.payflow.orchestrator.domain;
+package com.paymentengine.orchestrator.domain;
 
-import com.payflow.common.enums.PaymentState;
+import com.paymentengine.common.enums.PaymentState;
 
 import java.time.Instant;
 import java.util.List;

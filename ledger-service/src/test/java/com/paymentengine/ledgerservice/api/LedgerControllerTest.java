@@ -1,8 +1,8 @@
-package com.payflow.ledgerservice.api;
+package com.paymentengine.ledgerservice.api;
 
-import com.payflow.ledgerservice.domain.LedgerEntry;
-import com.payflow.ledgerservice.domain.PostingType;
-import com.payflow.ledgerservice.repository.LedgerEntryRepository;
+import com.paymentengine.ledgerservice.domain.LedgerEntry;
+import com.paymentengine.ledgerservice.domain.PostingType;
+import com.paymentengine.ledgerservice.repository.LedgerEntryRepository;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.autoconfigure.web.servlet.WebMvcTest;

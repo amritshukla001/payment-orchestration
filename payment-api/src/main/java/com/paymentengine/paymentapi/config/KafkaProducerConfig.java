@@ -1,4 +1,4 @@
-package com.payflow.paymentapi.config;
+package com.paymentengine.paymentapi.config;
 
 import org.apache.kafka.clients.producer.ProducerConfig;
 import org.apache.kafka.common.serialization.StringSerializer;

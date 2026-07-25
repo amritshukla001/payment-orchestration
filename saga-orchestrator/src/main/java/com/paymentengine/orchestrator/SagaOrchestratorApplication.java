@@ -1,4 +1,4 @@
-package com.payflow.orchestrator;
+package com.paymentengine.orchestrator;
 
 import io.swagger.v3.oas.annotations.OpenAPIDefinition;
 import io.swagger.v3.oas.annotations.enums.SecuritySchemeIn;
@@ -14,7 +14,7 @@ import org.springframework.kafka.annotation.EnableKafka;
 @EnableKafka
 @OpenAPIDefinition(
         info = @Info(
-                title = "PayFlow saga-orchestrator",
+                title = "Payment Processing Engine saga-orchestrator",
                 description = "Owns the payment saga state machine. Read APIs fold the "
                         + "event-sourced payment_saga_events log into a payment's live state, "
                         + "plus on-demand AI incident summaries for compensated payments.",

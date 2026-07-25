@@ -1,6 +1,6 @@
-package com.payflow.notificationservice.repository;
+package com.paymentengine.notificationservice.repository;
 
-import com.payflow.notificationservice.domain.ProcessedEvent;
+import com.paymentengine.notificationservice.domain.ProcessedEvent;
 import org.springframework.data.jpa.repository.JpaRepository;
 import java.util.UUID;
 

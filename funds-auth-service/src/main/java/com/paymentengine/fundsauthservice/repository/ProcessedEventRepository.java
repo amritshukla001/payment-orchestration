@@ -1,6 +1,6 @@
-package com.payflow.fundsauthservice.repository;
+package com.paymentengine.fundsauthservice.repository;
 
-import com.payflow.fundsauthservice.domain.ProcessedEvent;
+import com.paymentengine.fundsauthservice.domain.ProcessedEvent;
 import org.springframework.data.jpa.repository.JpaRepository;
 import java.util.UUID;
 

@@ -1,4 +1,4 @@
-package com.payflow.notificationservice.domain;
+package com.paymentengine.notificationservice.domain;
 
 import jakarta.persistence.*;
 import java.time.Instant;

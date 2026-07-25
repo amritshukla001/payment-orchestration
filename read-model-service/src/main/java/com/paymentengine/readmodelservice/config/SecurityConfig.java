@@ -1,6 +1,6 @@
-package com.payflow.readmodelservice.config;
+package com.paymentengine.readmodelservice.config;
 
-import com.payflow.common.security.ApiKeyAuthFilter;
+import com.paymentengine.common.security.ApiKeyAuthFilter;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.boot.web.servlet.FilterRegistrationBean;
 import org.springframework.context.annotation.Bean;
@@ -13,7 +13,7 @@ public class SecurityConfig {
 
     @Bean
     public FilterRegistrationBean<ApiKeyAuthFilter> apiKeyAuthFilter(
-            @Value("${payflow.security.api-key}") String apiKey) {
+            @Value("${paymentengine.security.api-key}") String apiKey) {
         FilterRegistrationBean<ApiKeyAuthFilter> registration = new FilterRegistrationBean<>(
                 new ApiKeyAuthFilter(apiKey, List.of("/actuator", "/v3/api-docs", "/swagger-ui")));
         registration.addUrlPatterns("/*");

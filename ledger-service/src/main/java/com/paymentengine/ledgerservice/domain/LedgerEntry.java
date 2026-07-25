@@ -1,4 +1,4 @@
-package com.payflow.ledgerservice.domain;
+package com.paymentengine.ledgerservice.domain;
 
 import jakarta.persistence.*;
 import java.time.Instant;

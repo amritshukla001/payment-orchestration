@@ -1,4 +1,4 @@
-package com.payflow.paymentapi.domain;
+package com.paymentengine.paymentapi.domain;
 
 import jakarta.persistence.*;
 import java.time.Instant;

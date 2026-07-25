@@ -1,4 +1,4 @@
-package com.payflow.fraudservice.config;
+package com.paymentengine.fraudservice.config;
 
 import org.apache.kafka.clients.consumer.ConsumerConfig;
 import org.apache.kafka.clients.producer.ProducerConfig;

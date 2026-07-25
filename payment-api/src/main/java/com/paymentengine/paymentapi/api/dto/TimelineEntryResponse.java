@@ -1,6 +1,6 @@
-package com.payflow.paymentapi.api.dto;
+package com.paymentengine.paymentapi.api.dto;
 
-import com.payflow.paymentapi.domain.OutboxEvent;
+import com.paymentengine.paymentapi.domain.OutboxEvent;
 import java.time.Instant;
 
 public record TimelineEntryResponse(

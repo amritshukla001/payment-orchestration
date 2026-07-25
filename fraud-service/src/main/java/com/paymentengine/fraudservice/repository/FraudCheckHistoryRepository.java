@@ -1,6 +1,6 @@
-package com.payflow.fraudservice.repository;
+package com.paymentengine.fraudservice.repository;
 
-import com.payflow.fraudservice.domain.FraudCheckHistory;
+import com.paymentengine.fraudservice.domain.FraudCheckHistory;
 import org.springframework.data.jpa.repository.JpaRepository;
 
 import java.time.Instant;

@@ -1,4 +1,4 @@
-package com.payflow.readmodelservice.api.dto;
+package com.paymentengine.readmodelservice.api.dto;
 
 import java.util.List;
 

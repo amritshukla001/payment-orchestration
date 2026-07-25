@@ -3,7 +3,7 @@
 // gateway's single origin, which routes each path to the right service.
 const GATEWAY_URL = "http://localhost:8088";
 
-// Matches each service's PAYFLOW_API_KEY default (local-dev-api-key-change-me)
+// Matches each service's PAYMENTENGINE_API_KEY default (local-dev-api-key-change-me)
 // unless overridden -- see dashboard/README.md. A key shipped in frontend JS
 // is never a real secret; this demonstrates the auth boundary, not credential
 // management.

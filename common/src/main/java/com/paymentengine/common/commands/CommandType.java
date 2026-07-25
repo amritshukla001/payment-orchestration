@@ -1,4 +1,4 @@
-package com.payflow.common.commands;
+package com.paymentengine.common.commands;
 
 /**
  * Commands issued by the saga orchestrator onto payment.commands.

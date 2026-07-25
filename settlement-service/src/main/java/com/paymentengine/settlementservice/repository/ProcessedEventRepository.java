@@ -1,6 +1,6 @@
-package com.payflow.settlementservice.repository;
+package com.paymentengine.settlementservice.repository;
 
-import com.payflow.settlementservice.domain.ProcessedEvent;
+import com.paymentengine.settlementservice.domain.ProcessedEvent;
 import org.springframework.data.jpa.repository.JpaRepository;
 import java.util.UUID;
 

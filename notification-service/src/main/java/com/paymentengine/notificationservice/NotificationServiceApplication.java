@@ -1,4 +1,4 @@
-package com.payflow.notificationservice;
+package com.paymentengine.notificationservice;
 
 import io.swagger.v3.oas.annotations.OpenAPIDefinition;
 import io.swagger.v3.oas.annotations.enums.SecuritySchemeIn;
@@ -14,7 +14,7 @@ import org.springframework.kafka.annotation.EnableKafka;
 @EnableKafka
 @OpenAPIDefinition(
         info = @Info(
-                title = "PayFlow notification-service",
+                title = "Payment Processing Engine notification-service",
                 description = "Records mock notifications for terminal payment outcomes. The "
                         + "read API returns every notification sent for a payment.",
                 version = "v1"

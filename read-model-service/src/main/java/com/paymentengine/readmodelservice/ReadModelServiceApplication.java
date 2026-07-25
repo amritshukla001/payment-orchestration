@@ -1,4 +1,4 @@
-package com.payflow.readmodelservice;
+package com.paymentengine.readmodelservice;
 
 import io.swagger.v3.oas.annotations.OpenAPIDefinition;
 import io.swagger.v3.oas.annotations.enums.SecuritySchemeIn;
@@ -14,7 +14,7 @@ import org.springframework.kafka.annotation.EnableKafka;
 @EnableKafka
 @OpenAPIDefinition(
         info = @Info(
-                title = "PayFlow read-model-service",
+                title = "Payment Processing Engine read-model-service",
                 description = "CQRS read side: a denormalized projection of every payment "
                         + "(state, ledger entries, notifications) built from payment.events, "
                         + "purpose-shaped for the dashboard.",

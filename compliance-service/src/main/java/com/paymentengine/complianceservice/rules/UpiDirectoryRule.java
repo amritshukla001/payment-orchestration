@@ -1,8 +1,8 @@
-package com.payflow.complianceservice.rules;
+package com.paymentengine.complianceservice.rules;
 
-import com.payflow.common.commands.CheckComplianceCommand;
-import com.payflow.common.enums.PaymentMethod;
-import com.payflow.complianceservice.repository.UpiRegistrationRepository;
+import com.paymentengine.common.commands.CheckComplianceCommand;
+import com.paymentengine.common.enums.PaymentMethod;
+import com.paymentengine.complianceservice.repository.UpiRegistrationRepository;
 import org.springframework.core.annotation.Order;
 import org.springframework.stereotype.Component;
 

@@ -1,4 +1,4 @@
-package com.payflow.paymentapi;
+package com.paymentengine.paymentapi;
 
 import io.swagger.v3.oas.annotations.OpenAPIDefinition;
 import io.swagger.v3.oas.annotations.enums.SecuritySchemeIn;
@@ -14,8 +14,8 @@ import org.springframework.scheduling.annotation.EnableScheduling;
 @EnableScheduling
 @OpenAPIDefinition(
         info = @Info(
-                title = "PayFlow payment-api",
-                description = "Intake service for the payment-orchestration saga: validates payment "
+                title = "Payment Processing Engine payment-api",
+                description = "Intake service for the payment-processing-engine saga: validates payment "
                         + "requests, persists them, and publishes events via the transactional outbox.",
                 version = "v1"
         ),

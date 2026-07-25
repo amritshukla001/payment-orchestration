@@ -1,6 +1,6 @@
-package com.payflow.common.events;
+package com.paymentengine.common.events;
 
-import com.payflow.common.enums.PaymentMethod;
+import com.paymentengine.common.enums.PaymentMethod;
 
 import java.time.Instant;
 import java.util.UUID;
