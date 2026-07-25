@@ -1,6 +1,6 @@
-package com.paymentengine.fraudservice.rules;
+package com.payflow.fraudservice.rules;
 
-import com.paymentengine.common.commands.CheckFraudCommand;
+import com.payflow.common.commands.CheckFraudCommand;
 import org.springframework.core.annotation.Order;
 import org.springframework.stereotype.Component;
 import java.util.Optional;

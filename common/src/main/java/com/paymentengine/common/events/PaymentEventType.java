@@ -1,4 +1,4 @@
-package com.paymentengine.common.events;
+package com.payflow.common.events;
 
 /**
  * Event types published onto the payment.events topic.

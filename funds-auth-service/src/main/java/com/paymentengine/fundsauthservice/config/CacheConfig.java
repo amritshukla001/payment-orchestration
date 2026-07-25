@@ -1,4 +1,4 @@
-package com.paymentengine.fundsauthservice.config;
+package com.payflow.fundsauthservice.config;
 
 import org.springframework.cache.annotation.EnableCaching;
 import org.springframework.context.annotation.Configuration;

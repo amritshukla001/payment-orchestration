@@ -1,10 +1,10 @@
-package com.paymentengine.fundsauthservice.bank;
+package com.payflow.fundsauthservice.bank;
 
-import com.paymentengine.fundsauthservice.domain.Account;
-import com.paymentengine.fundsauthservice.domain.FundsReservation;
-import com.paymentengine.fundsauthservice.domain.ReservationStatus;
-import com.paymentengine.fundsauthservice.repository.AccountRepository;
-import com.paymentengine.fundsauthservice.repository.FundsReservationRepository;
+import com.payflow.fundsauthservice.domain.Account;
+import com.payflow.fundsauthservice.domain.FundsReservation;
+import com.payflow.fundsauthservice.domain.ReservationStatus;
+import com.payflow.fundsauthservice.repository.AccountRepository;
+import com.payflow.fundsauthservice.repository.FundsReservationRepository;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.Mock;

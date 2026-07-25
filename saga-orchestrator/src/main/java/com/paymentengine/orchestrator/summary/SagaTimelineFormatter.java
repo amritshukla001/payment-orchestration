@@ -1,6 +1,6 @@
-package com.paymentengine.orchestrator.summary;
+package com.payflow.orchestrator.summary;
 
-import com.paymentengine.orchestrator.domain.SagaEvent;
+import com.payflow.orchestrator.domain.SagaEvent;
 import org.springframework.stereotype.Component;
 
 import java.util.List;

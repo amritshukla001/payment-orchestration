@@ -1,6 +1,6 @@
-package com.paymentengine.paymentapi.api.dto;
+package com.payflow.paymentapi.api.dto;
 
-import com.paymentengine.common.enums.PaymentMethod;
+import com.payflow.common.enums.PaymentMethod;
 import io.swagger.v3.oas.annotations.media.Schema;
 import jakarta.validation.constraints.NotNull;
 import jakarta.validation.constraints.Positive;

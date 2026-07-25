@@ -1,6 +1,6 @@
-package com.paymentengine.paymentapi.repository;
+package com.payflow.paymentapi.repository;
 
-import com.paymentengine.paymentapi.domain.OutboxEvent;
+import com.payflow.paymentapi.domain.OutboxEvent;
 import org.springframework.data.jpa.repository.JpaRepository;
 import java.util.List;
 import java.util.UUID;

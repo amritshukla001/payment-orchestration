@@ -5,8 +5,8 @@
   <modelVersion>4.0.0</modelVersion>
 
   <parent>
-    <groupId>com.paymentengine</groupId>
-    <artifactId>payment-processing-engine</artifactId>
+    <groupId>com.payflow</groupId>
+    <artifactId>payment-orchestration</artifactId>
     <version>0.1.0-SNAPSHOT</version>
   </parent>
 
@@ -14,7 +14,7 @@
   <packaging>jar</packaging>
 
   <name>common</name>
-  <description>Shared event contracts and enums used across payment-processing-engine services</description>
+  <description>Shared event contracts and enums used across payment-orchestration services</description>
 
   <dependencies>
     <dependency>

@@ -152,7 +152,7 @@ export default function App() {
     <div className="console">
       <header className="console__header">
         <div>
-          <h1>Payment Processing Engine Ops Console</h1>
+          <h1>PayFlow Ops Console</h1>
           <p className="console__subtitle">
             Live view over read-model-service's CQRS projection — a
             denormalized read model built from payment.events, decoupled

@@ -1,4 +1,4 @@
-package com.paymentengine.ledgerservice;
+package com.payflow.ledgerservice;
 
 import io.swagger.v3.oas.annotations.OpenAPIDefinition;
 import io.swagger.v3.oas.annotations.enums.SecuritySchemeIn;
@@ -14,7 +14,7 @@ import org.springframework.kafka.annotation.EnableKafka;
 @EnableKafka
 @OpenAPIDefinition(
         info = @Info(
-                title = "Payment Processing Engine ledger-service",
+                title = "PayFlow ledger-service",
                 description = "Append-only double-entry ledger. The read API returns every "
                         + "posting (HOLD, FINAL, REVERSAL) recorded for a payment.",
                 version = "v1"

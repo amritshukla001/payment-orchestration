@@ -1,4 +1,4 @@
-package com.paymentengine.fundsauthservice.config;
+package com.payflow.fundsauthservice.config;
 
 import org.apache.kafka.clients.consumer.ConsumerConfig;
 import org.apache.kafka.clients.producer.ProducerConfig;

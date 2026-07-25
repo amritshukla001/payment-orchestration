@@ -1,6 +1,6 @@
-package com.paymentengine.complianceservice.api.dto;
+package com.payflow.complianceservice.api.dto;
 
-import com.paymentengine.complianceservice.domain.UpiRegistration;
+import com.payflow.complianceservice.domain.UpiRegistration;
 
 import java.time.Instant;
 import java.util.UUID;

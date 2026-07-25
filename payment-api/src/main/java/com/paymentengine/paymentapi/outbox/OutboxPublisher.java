@@ -1,10 +1,10 @@
-package com.paymentengine.paymentapi.outbox;
+package com.payflow.paymentapi.outbox;
 
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
-import com.paymentengine.common.events.EventEnvelope;
-import com.paymentengine.paymentapi.domain.OutboxEvent;
-import com.paymentengine.paymentapi.repository.OutboxEventRepository;
+import com.payflow.common.events.EventEnvelope;
+import com.payflow.paymentapi.domain.OutboxEvent;
+import com.payflow.paymentapi.repository.OutboxEventRepository;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.kafka.core.KafkaTemplate;

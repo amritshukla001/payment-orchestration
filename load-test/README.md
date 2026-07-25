@@ -57,7 +57,7 @@ Both scripts default to `http://localhost:8080` and the default local API
 key. Override either via env vars:
 
 ```bash
-BASE_URL=http://localhost:8080 PAYMENTENGINE_API_KEY=your-key k6 run load-test/payments-throughput-test.js
+BASE_URL=http://localhost:8080 PAYFLOW_API_KEY=your-key k6 run load-test/payments-throughput-test.js
 ```
 
 ## Not part of CI

@@ -1,4 +1,4 @@
-package com.paymentengine.fraudservice.rules.ml;
+package com.payflow.fraudservice.rules.ml;
 
 public class MlScorerUnavailableException extends RuntimeException {
     public MlScorerUnavailableException(String message) {

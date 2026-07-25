@@ -1,6 +1,6 @@
-# Payment Processing Engine
+# payment-orchestration
 
-[![CI](https://github.com/amritshukla001/payment-processing-engine/actions/workflows/ci.yml/badge.svg)](https://github.com/amritshukla001/payment-processing-engine/actions/workflows/ci.yml)
+[![CI](https://github.com/amritshukla001/payment-orchestration/actions/workflows/ci.yml/badge.svg)](https://github.com/amritshukla001/payment-orchestration/actions/workflows/ci.yml)
 
 A backend system-design playground — a portfolio project built to
 deliberately exercise as broad a range of real HLD and LLD concepts as
@@ -456,7 +456,7 @@ budget.
 `POST /payments` specifically — the client-facing write that actually
 drives a saga through fraud, funds, ledger, and settlement — is
 rate-limited via Spring Cloud Gateway's built-in Redis-backed
-`RequestRateLimiter` (reusing the same `paymentengine-redis` container from
+`RequestRateLimiter` (reusing the same `payflow-redis` container from
 [Caching](#caching)), keyed per `X-API-Key` by a custom `KeyResolver` bean.
 `replenishRate: 20`, `burstCapacity: 40` are deliberately the same numbers
 [Load testing](#load-testing)'s k6 scripts already use for average (20/s)
@@ -655,8 +655,8 @@ Every REST endpoint across the six services that expose one — `payment-api`,
 each service registers explicitly via its own `FilterRegistrationBean`
 (component scanning never crosses from `common` into a service's own base
 package, so this can't just be a `@Component` picked up automatically). The
-key is a single configured value (`paymentengine.security.api-key`, overridable via
-the `PAYMENTENGINE_API_KEY` env var, defaulting to `local-dev-api-key-change-me`
+key is a single configured value (`payflow.security.api-key`, overridable via
+the `PAYFLOW_API_KEY` env var, defaulting to `local-dev-api-key-change-me`
 for local dev) — deliberately simple, since the point is demonstrating the
 auth boundary itself, not building a credential-management system.
 `/actuator/**` is explicitly exempted so health checks keep working
@@ -666,7 +666,7 @@ nothing to gate on them beyond actuator.
 
 The [API Gateway](#api-gateway) adds the same check again at the edge
 (`AuthGlobalFilter`, checking the same header against the same
-`paymentengine.security.api-key` value) before a request reaches any backend —
+`payflow.security.api-key` value) before a request reaches any backend —
 deliberately in addition to, not instead of, each service's own check,
 since backend ports remain directly reachable with no network isolation
 locally.
@@ -959,7 +959,7 @@ That reaches `COMPENSATED` — check the ledger to see the HOLD and REVERSAL
 entries exactly offsetting (below), and the account balance restored:
 
 ```bash
-docker exec paymentengine-postgres psql -U payflow -d fundsauth \
+docker exec payflow-postgres psql -U payflow -d fundsauth \
   -c "SELECT account_id, balance_cents FROM accounts WHERE account_id = '33333333-3333-3333-3333-333333333333';"
 ```
 
@@ -983,21 +983,21 @@ shows the full [event-sourced](#event-sourcing) transition log, not just
 the current value:
 
 ```bash
-docker exec paymentengine-postgres psql -U payflow -d orchestrator \
+docker exec payflow-postgres psql -U payflow -d orchestrator \
   -c "SELECT payment_id, sequence_number, event_type, to_state FROM payment_saga_events ORDER BY payment_id, sequence_number;"
 ```
 
 Check both ledger legs (HOLD then FINAL):
 
 ```bash
-docker exec paymentengine-postgres psql -U payflow -d ledger \
+docker exec payflow-postgres psql -U payflow -d ledger \
   -c "SELECT payment_id, debit_account, credit_account, amount_cents, posting_type FROM ledger_entries ORDER BY posted_at;"
 ```
 
 Check the settlement capture record:
 
 ```bash
-docker exec paymentengine-postgres psql -U payflow -d settlement \
+docker exec payflow-postgres psql -U payflow -d settlement \
   -c "SELECT payment_id, amount_cents, captured_at FROM settlements;"
 ```
 
@@ -1005,7 +1005,7 @@ Check who got notified (both payer and payee on success; payer only on a
 `FAILED` payment):
 
 ```bash
-docker exec paymentengine-postgres psql -U payflow -d notification \
+docker exec payflow-postgres psql -U payflow -d notification \
   -c "SELECT payment_id, recipient, outcome, message FROM notifications;"
 ```
 
@@ -1023,7 +1023,7 @@ match the folded state of the event log above once `read-model-service`
 catches up:
 
 ```bash
-docker exec paymentengine-postgres psql -U payflow -d readmodel \
+docker exec payflow-postgres psql -U payflow -d readmodel \
   -c "SELECT payment_id, state FROM payment_view;"
 curl -H "X-API-Key: local-dev-api-key-change-me" http://localhost:8088/api/payments/<id>
 ```

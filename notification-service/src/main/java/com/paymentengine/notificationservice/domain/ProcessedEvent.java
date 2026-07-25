@@ -1,4 +1,4 @@
-package com.paymentengine.notificationservice.domain;
+package com.payflow.notificationservice.domain;
 
 import jakarta.persistence.Column;
 import jakarta.persistence.Entity;

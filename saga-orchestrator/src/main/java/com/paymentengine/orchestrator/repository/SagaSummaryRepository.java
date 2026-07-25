@@ -1,6 +1,6 @@
-package com.paymentengine.orchestrator.repository;
+package com.payflow.orchestrator.repository;
 
-import com.paymentengine.orchestrator.domain.SagaSummary;
+import com.payflow.orchestrator.domain.SagaSummary;
 import org.springframework.data.jpa.repository.JpaRepository;
 import java.util.UUID;
 

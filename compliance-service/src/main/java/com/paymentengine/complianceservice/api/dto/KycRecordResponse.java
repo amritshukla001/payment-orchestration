@@ -1,6 +1,6 @@
-package com.paymentengine.complianceservice.api.dto;
+package com.payflow.complianceservice.api.dto;
 
-import com.paymentengine.complianceservice.domain.KycRecord;
+import com.payflow.complianceservice.domain.KycRecord;
 
 import java.time.Instant;
 import java.util.UUID;

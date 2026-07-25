@@ -1,4 +1,4 @@
-package com.paymentengine.orchestrator.summary;
+package com.payflow.orchestrator.summary;
 
 import io.github.resilience4j.circuitbreaker.annotation.CircuitBreaker;
 import org.slf4j.Logger;
@@ -45,8 +45,8 @@ public class GeminiSummaryClient {
     private final String apiKey;
     private final String model;
 
-    public GeminiSummaryClient(@Value("${paymentengine.ai.api-key}") String apiKey,
-                                @Value("${paymentengine.ai.model}") String model) {
+    public GeminiSummaryClient(@Value("${payflow.ai.api-key}") String apiKey,
+                                @Value("${payflow.ai.model}") String model) {
         this.apiKey = apiKey;
         this.model = model;
         this.restClient = RestClient.create();

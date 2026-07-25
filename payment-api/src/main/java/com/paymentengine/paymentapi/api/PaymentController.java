@@ -1,11 +1,11 @@
-package com.paymentengine.paymentapi.api;
+package com.payflow.paymentapi.api;
 
-import com.paymentengine.paymentapi.api.dto.CreatePaymentRequest;
-import com.paymentengine.paymentapi.api.dto.PaymentResponse;
-import com.paymentengine.paymentapi.api.dto.TimelineEntryResponse;
-import com.paymentengine.paymentapi.domain.Payment;
-import com.paymentengine.paymentapi.repository.OutboxEventRepository;
-import com.paymentengine.paymentapi.service.PaymentService;
+import com.payflow.paymentapi.api.dto.CreatePaymentRequest;
+import com.payflow.paymentapi.api.dto.PaymentResponse;
+import com.payflow.paymentapi.api.dto.TimelineEntryResponse;
+import com.payflow.paymentapi.domain.Payment;
+import com.payflow.paymentapi.repository.OutboxEventRepository;
+import com.payflow.paymentapi.service.PaymentService;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.Parameter;
 import io.swagger.v3.oas.annotations.tags.Tag;
@@ -65,8 +65,8 @@ public class PaymentController {
                 .toList();
     }
 
-    @ExceptionHandler(com.paymentengine.paymentapi.service.PaymentNotFoundException.class)
-    public ResponseEntity<String> handleNotFound(com.paymentengine.paymentapi.service.PaymentNotFoundException e) {
+    @ExceptionHandler(com.payflow.paymentapi.service.PaymentNotFoundException.class)
+    public ResponseEntity<String> handleNotFound(com.payflow.paymentapi.service.PaymentNotFoundException e) {
         return ResponseEntity.status(HttpStatus.NOT_FOUND).body(e.getMessage());
     }
 }

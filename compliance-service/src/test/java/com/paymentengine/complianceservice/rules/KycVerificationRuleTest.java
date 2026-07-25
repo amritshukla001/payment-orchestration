@@ -1,9 +1,9 @@
-package com.paymentengine.complianceservice.rules;
+package com.payflow.complianceservice.rules;
 
-import com.paymentengine.common.commands.CheckComplianceCommand;
-import com.paymentengine.common.enums.PaymentMethod;
-import com.paymentengine.complianceservice.domain.KycRecord;
-import com.paymentengine.complianceservice.repository.KycRecordRepository;
+import com.payflow.common.commands.CheckComplianceCommand;
+import com.payflow.common.enums.PaymentMethod;
+import com.payflow.complianceservice.domain.KycRecord;
+import com.payflow.complianceservice.repository.KycRecordRepository;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;

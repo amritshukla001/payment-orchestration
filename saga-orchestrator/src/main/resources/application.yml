@@ -50,9 +50,9 @@ resilience4j:
         wait-duration-in-open-state: 5s
         permitted-number-of-calls-in-half-open-state: 3
 
-paymentengine:
+payflow:
   security:
-    api-key: ${PAYMENTENGINE_API_KEY:local-dev-api-key-change-me}
+    api-key: ${PAYFLOW_API_KEY:local-dev-api-key-change-me}
   ai:
     # Empty default is a normal local-dev state: the summary endpoint then
     # serves the deterministic fallback instead of calling the Gemini API.

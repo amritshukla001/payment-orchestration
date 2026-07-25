@@ -1,6 +1,6 @@
-package com.paymentengine.readmodelservice.repository;
+package com.payflow.readmodelservice.repository;
 
-import com.paymentengine.readmodelservice.domain.ProcessedEvent;
+import com.payflow.readmodelservice.domain.ProcessedEvent;
 import org.springframework.data.jpa.repository.JpaRepository;
 import java.util.UUID;
 

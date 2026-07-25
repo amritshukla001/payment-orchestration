@@ -1,9 +1,9 @@
-package com.paymentengine.readmodelservice;
+package com.payflow.readmodelservice;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.node.ObjectNode;
 import com.fasterxml.jackson.datatype.jsr310.JavaTimeModule;
-import com.paymentengine.common.events.EventEnvelope;
+import com.payflow.common.events.EventEnvelope;
 import org.apache.kafka.clients.producer.KafkaProducer;
 import org.apache.kafka.clients.producer.ProducerConfig;
 import org.apache.kafka.clients.producer.ProducerRecord;
@@ -60,7 +60,7 @@ class ReadModelServiceIntegrationTest {
         registry.add("spring.datasource.username", postgres::getUsername);
         registry.add("spring.datasource.password", postgres::getPassword);
         registry.add("spring.kafka.bootstrap-servers", kafka::getBootstrapServers);
-        registry.add("paymentengine.security.api-key", () -> API_KEY);
+        registry.add("payflow.security.api-key", () -> API_KEY);
     }
 
     @Autowired

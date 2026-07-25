@@ -1,4 +1,4 @@
-package com.paymentengine.settlementservice.config;
+package com.payflow.settlementservice.config;
 
 import org.apache.kafka.clients.consumer.ConsumerConfig;
 import org.apache.kafka.clients.producer.ProducerConfig;

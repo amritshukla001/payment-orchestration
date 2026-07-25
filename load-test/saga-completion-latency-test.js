@@ -12,7 +12,7 @@ import { Trend, Counter } from 'k6/metrics';
 import { uuidv4, randomAmountCents } from './lib.js';
 
 const BASE_URL = __ENV.BASE_URL || 'http://localhost:8080';
-const API_KEY = __ENV.PAYMENTENGINE_API_KEY || 'local-dev-api-key-change-me';
+const API_KEY = __ENV.PAYFLOW_API_KEY || 'local-dev-api-key-change-me';
 
 const POLL_INTERVAL_SECONDS = 0.25;
 const MAX_WAIT_SECONDS = 15;

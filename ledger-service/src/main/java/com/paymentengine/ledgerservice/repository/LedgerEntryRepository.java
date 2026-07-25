@@ -1,7 +1,7 @@
-package com.paymentengine.ledgerservice.repository;
+package com.payflow.ledgerservice.repository;
 
-import com.paymentengine.ledgerservice.domain.LedgerEntry;
-import com.paymentengine.ledgerservice.domain.PostingType;
+import com.payflow.ledgerservice.domain.LedgerEntry;
+import com.payflow.ledgerservice.domain.PostingType;
 import org.springframework.data.jpa.repository.JpaRepository;
 import java.util.List;
 import java.util.Optional;

@@ -1,7 +1,7 @@
-package com.paymentengine.notificationservice.api;
+package com.payflow.notificationservice.api;
 
-import com.paymentengine.notificationservice.api.dto.NotificationResponse;
-import com.paymentengine.notificationservice.repository.NotificationRecordRepository;
+import com.payflow.notificationservice.api.dto.NotificationResponse;
+import com.payflow.notificationservice.repository.NotificationRecordRepository;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.tags.Tag;
 import org.springframework.web.bind.annotation.GetMapping;

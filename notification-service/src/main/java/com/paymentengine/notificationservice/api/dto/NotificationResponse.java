@@ -1,6 +1,6 @@
-package com.paymentengine.notificationservice.api.dto;
+package com.payflow.notificationservice.api.dto;
 
-import com.paymentengine.notificationservice.domain.NotificationRecord;
+import com.payflow.notificationservice.domain.NotificationRecord;
 
 import java.time.Instant;
 import java.util.UUID;

@@ -1,9 +1,9 @@
-package com.paymentengine.fundsauthservice.bank;
+package com.payflow.fundsauthservice.bank;
 
-import com.paymentengine.fundsauthservice.domain.Account;
-import com.paymentengine.fundsauthservice.domain.FundsReservation;
-import com.paymentengine.fundsauthservice.repository.AccountRepository;
-import com.paymentengine.fundsauthservice.repository.FundsReservationRepository;
+import com.payflow.fundsauthservice.domain.Account;
+import com.payflow.fundsauthservice.domain.FundsReservation;
+import com.payflow.fundsauthservice.repository.AccountRepository;
+import com.payflow.fundsauthservice.repository.FundsReservationRepository;
 import io.github.resilience4j.circuitbreaker.annotation.CircuitBreaker;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -71,7 +71,7 @@ public class MockBankLedger {
 
     public void release(UUID paymentId) {
         reservationRepository.findById(paymentId).ifPresent(reservation -> {
-            if (reservation.getStatus() == com.paymentengine.fundsauthservice.domain.ReservationStatus.RELEASED) {
+            if (reservation.getStatus() == com.payflow.fundsauthservice.domain.ReservationStatus.RELEASED) {
                 return; // already released — idempotent no-op
             }
             accountRepository.findById(reservation.getAccountId())

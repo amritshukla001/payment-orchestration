@@ -1,9 +1,9 @@
-package com.paymentengine.notificationservice.api;
+package com.payflow.notificationservice.api;
 
-import com.paymentengine.notificationservice.domain.NotificationRecord;
-import com.paymentengine.notificationservice.domain.Outcome;
-import com.paymentengine.notificationservice.domain.Recipient;
-import com.paymentengine.notificationservice.repository.NotificationRecordRepository;
+import com.payflow.notificationservice.domain.NotificationRecord;
+import com.payflow.notificationservice.domain.Outcome;
+import com.payflow.notificationservice.domain.Recipient;
+import com.payflow.notificationservice.repository.NotificationRecordRepository;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.autoconfigure.web.servlet.WebMvcTest;

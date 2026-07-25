@@ -1,4 +1,4 @@
-package com.paymentengine.settlementservice.domain;
+package com.payflow.settlementservice.domain;
 
 import jakarta.persistence.Column;
 import jakarta.persistence.Entity;

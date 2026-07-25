@@ -1,8 +1,8 @@
-package com.paymentengine.fraudservice.rules.ml;
+package com.payflow.fraudservice.rules.ml;
 
-import com.paymentengine.common.commands.CheckFraudCommand;
-import com.paymentengine.fraudservice.domain.FraudCheckHistory;
-import com.paymentengine.fraudservice.repository.FraudCheckHistoryRepository;
+import com.payflow.common.commands.CheckFraudCommand;
+import com.payflow.fraudservice.domain.FraudCheckHistory;
+import com.payflow.fraudservice.repository.FraudCheckHistoryRepository;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.Mock;

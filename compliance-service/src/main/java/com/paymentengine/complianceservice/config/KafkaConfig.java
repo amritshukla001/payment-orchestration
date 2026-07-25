@@ -1,4 +1,4 @@
-package com.paymentengine.complianceservice.config;
+package com.payflow.complianceservice.config;
 
 import org.apache.kafka.clients.consumer.ConsumerConfig;
 import org.apache.kafka.clients.producer.ProducerConfig;

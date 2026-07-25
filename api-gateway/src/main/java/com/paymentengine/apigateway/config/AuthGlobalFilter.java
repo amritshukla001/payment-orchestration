@@ -1,4 +1,4 @@
-package com.paymentengine.apigateway.config;
+package com.payflow.apigateway.config;
 
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.cloud.gateway.filter.GatewayFilterChain;
@@ -31,7 +31,7 @@ public class AuthGlobalFilter implements GlobalFilter, Ordered {
 
     private final String expectedApiKey;
 
-    public AuthGlobalFilter(@Value("${paymentengine.security.api-key}") String expectedApiKey) {
+    public AuthGlobalFilter(@Value("${payflow.security.api-key}") String expectedApiKey) {
         this.expectedApiKey = expectedApiKey;
     }
 

@@ -1,6 +1,6 @@
-package com.paymentengine.fundsauthservice.repository;
+package com.payflow.fundsauthservice.repository;
 
-import com.paymentengine.fundsauthservice.domain.Account;
+import com.payflow.fundsauthservice.domain.Account;
 import org.springframework.data.jpa.repository.JpaRepository;
 import java.util.UUID;
 

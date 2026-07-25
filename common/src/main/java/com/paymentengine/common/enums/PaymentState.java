@@ -1,4 +1,4 @@
-package com.paymentengine.common.enums;
+package com.payflow.common.enums;
 
 /**
  * Lifecycle of a payment as it moves through the saga.

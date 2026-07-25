@@ -1,4 +1,4 @@
-package com.paymentengine.settlementservice.risk;
+package com.payflow.settlementservice.risk;
 
 import org.junit.jupiter.api.Test;
 

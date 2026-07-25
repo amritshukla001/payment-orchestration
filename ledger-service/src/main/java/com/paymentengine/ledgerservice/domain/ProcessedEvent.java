@@ -1,4 +1,4 @@
-package com.paymentengine.ledgerservice.domain;
+package com.payflow.ledgerservice.domain;
 
 import jakarta.persistence.Column;
 import jakarta.persistence.Entity;

@@ -1,6 +1,6 @@
-package com.paymentengine.orchestrator.repository;
+package com.payflow.orchestrator.repository;
 
-import com.paymentengine.orchestrator.domain.ProcessedEvent;
+import com.payflow.orchestrator.domain.ProcessedEvent;
 import org.springframework.data.jpa.repository.JpaRepository;
 import java.util.UUID;
 

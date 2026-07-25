@@ -1,6 +1,6 @@
-package com.paymentengine.fraudservice.repository;
+package com.payflow.fraudservice.repository;
 
-import com.paymentengine.fraudservice.domain.ProcessedEvent;
+import com.payflow.fraudservice.domain.ProcessedEvent;
 import org.springframework.data.jpa.repository.JpaRepository;
 import java.util.UUID;
 

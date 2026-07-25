@@ -1,6 +1,6 @@
-package com.paymentengine.paymentapi.repository;
+package com.payflow.paymentapi.repository;
 
-import com.paymentengine.paymentapi.domain.Payment;
+import com.payflow.paymentapi.domain.Payment;
 import org.springframework.data.jpa.repository.JpaRepository;
 import java.util.Optional;
 import java.util.UUID;

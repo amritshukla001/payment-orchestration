@@ -1,6 +1,6 @@
-package com.paymentengine.ledgerservice.api.dto;
+package com.payflow.ledgerservice.api.dto;
 
-import com.paymentengine.ledgerservice.domain.LedgerEntry;
+import com.payflow.ledgerservice.domain.LedgerEntry;
 
 import java.time.Instant;
 import java.util.UUID;

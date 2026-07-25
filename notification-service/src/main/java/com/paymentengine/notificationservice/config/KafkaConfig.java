@@ -1,4 +1,4 @@
-package com.paymentengine.notificationservice.config;
+package com.payflow.notificationservice.config;
 
 import org.apache.kafka.clients.consumer.ConsumerConfig;
 import org.apache.kafka.clients.producer.ProducerConfig;

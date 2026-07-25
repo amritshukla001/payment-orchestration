@@ -1,7 +1,7 @@
 services:
   postgres:
     image: postgres:16-alpine
-    container_name: paymentengine-postgres
+    container_name: payflow-postgres
     environment:
       POSTGRES_DB: payflow
       POSTGRES_USER: payflow
@@ -19,7 +19,7 @@ services:
 
   kafka:
     image: apache/kafka:3.7.0
-    container_name: paymentengine-kafka
+    container_name: payflow-kafka
     ports:
       - "9092:9092"
     environment:
@@ -49,7 +49,7 @@ services:
 
   kafka-ui:
     image: provectuslabs/kafka-ui:latest
-    container_name: paymentengine-kafka-ui
+    container_name: payflow-kafka-ui
     ports:
       - "8081:8080"
     environment:
@@ -60,7 +60,7 @@ services:
 
   prometheus:
     image: prom/prometheus:v2.53.0
-    container_name: paymentengine-prometheus
+    container_name: payflow-prometheus
     ports:
       - "9090:9090"
     volumes:
@@ -75,13 +75,13 @@ services:
 
   zipkin:
     image: openzipkin/zipkin:2.24
-    container_name: paymentengine-zipkin
+    container_name: payflow-zipkin
     ports:
       - "9411:9411"
 
   redis:
     image: redis:7-alpine
-    container_name: paymentengine-redis
+    container_name: payflow-redis
     ports:
       - "6379:6379"
     # No volume -- a pure cache-aside layer, safe to lose on restart;
@@ -100,7 +100,7 @@ services:
     build:
       context: .
       dockerfile: payment-api/Dockerfile
-    container_name: paymentengine-payment-api
+    container_name: payflow-payment-api
     ports:
       - "8080:8080"
     environment:
@@ -116,7 +116,7 @@ services:
     build:
       context: .
       dockerfile: saga-orchestrator/Dockerfile
-    container_name: paymentengine-saga-orchestrator
+    container_name: payflow-saga-orchestrator
     ports:
       - "8082:8082"
     environment:
@@ -135,7 +135,7 @@ services:
     build:
       context: .
       dockerfile: fraud-service/Dockerfile
-    container_name: paymentengine-fraud-service
+    container_name: payflow-fraud-service
     ports:
       - "8083:8083"
     environment:
@@ -151,7 +151,7 @@ services:
     build:
       context: .
       dockerfile: compliance-service/Dockerfile
-    container_name: paymentengine-compliance-service
+    container_name: payflow-compliance-service
     ports:
       - "8090:8090"
     environment:
@@ -167,7 +167,7 @@ services:
     build:
       context: .
       dockerfile: funds-auth-service/Dockerfile
-    container_name: paymentengine-funds-auth-service
+    container_name: payflow-funds-auth-service
     ports:
       - "8084:8084"
     environment:
@@ -185,7 +185,7 @@ services:
     build:
       context: .
       dockerfile: ledger-service/Dockerfile
-    container_name: paymentengine-ledger-service
+    container_name: payflow-ledger-service
     ports:
       - "8085:8085"
     environment:
@@ -201,7 +201,7 @@ services:
     build:
       context: .
       dockerfile: settlement-service/Dockerfile
-    container_name: paymentengine-settlement-service
+    container_name: payflow-settlement-service
     ports:
       - "8086:8086"
     environment:
@@ -217,7 +217,7 @@ services:
     build:
       context: .
       dockerfile: notification-service/Dockerfile
-    container_name: paymentengine-notification-service
+    container_name: payflow-notification-service
     ports:
       - "8087:8087"
     environment:
@@ -233,7 +233,7 @@ services:
     build:
       context: .
       dockerfile: read-model-service/Dockerfile
-    container_name: paymentengine-read-model-service
+    container_name: payflow-read-model-service
     ports:
       - "8089:8089"
     environment:
@@ -249,7 +249,7 @@ services:
     build:
       context: .
       dockerfile: api-gateway/Dockerfile
-    container_name: paymentengine-api-gateway
+    container_name: payflow-api-gateway
     ports:
       - "8088:8088"
     environment:

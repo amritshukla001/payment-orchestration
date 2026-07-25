@@ -1,6 +1,6 @@
-package com.paymentengine.complianceservice.rules;
+package com.payflow.complianceservice.rules;
 
-import com.paymentengine.common.commands.CheckComplianceCommand;
+import com.payflow.common.commands.CheckComplianceCommand;
 import java.util.Optional;
 
 /**

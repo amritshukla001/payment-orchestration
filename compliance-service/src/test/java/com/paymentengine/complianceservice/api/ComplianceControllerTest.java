@@ -1,10 +1,10 @@
-package com.paymentengine.complianceservice.api;
+package com.payflow.complianceservice.api;
 
-import com.paymentengine.complianceservice.domain.KycRecord;
-import com.paymentengine.complianceservice.domain.RegulatoryReport;
-import com.paymentengine.complianceservice.repository.KycRecordRepository;
-import com.paymentengine.complianceservice.repository.RegulatoryReportRepository;
-import com.paymentengine.complianceservice.repository.UpiRegistrationRepository;
+import com.payflow.complianceservice.domain.KycRecord;
+import com.payflow.complianceservice.domain.RegulatoryReport;
+import com.payflow.complianceservice.repository.KycRecordRepository;
+import com.payflow.complianceservice.repository.RegulatoryReportRepository;
+import com.payflow.complianceservice.repository.UpiRegistrationRepository;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.autoconfigure.web.servlet.WebMvcTest;

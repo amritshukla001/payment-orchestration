@@ -1,6 +1,6 @@
-package com.paymentengine.ledgerservice.config;
+package com.payflow.ledgerservice.config;
 
-import com.paymentengine.common.security.ApiKeyAuthFilter;
+import com.payflow.common.security.ApiKeyAuthFilter;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.boot.web.servlet.FilterRegistrationBean;
 import org.springframework.context.annotation.Bean;
@@ -13,7 +13,7 @@ public class SecurityConfig {
 
     @Bean
     public FilterRegistrationBean<ApiKeyAuthFilter> apiKeyAuthFilter(
-            @Value("${paymentengine.security.api-key}") String apiKey) {
+            @Value("${payflow.security.api-key}") String apiKey) {
         FilterRegistrationBean<ApiKeyAuthFilter> registration = new FilterRegistrationBean<>(
                 new ApiKeyAuthFilter(apiKey, List.of("/actuator", "/v3/api-docs", "/swagger-ui")));
         registration.addUrlPatterns("/*");

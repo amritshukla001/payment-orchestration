@@ -1,4 +1,4 @@
-package com.paymentengine.fraudservice.rules.ml;
+package com.payflow.fraudservice.rules.ml;
 
 import io.github.resilience4j.circuitbreaker.annotation.CircuitBreaker;
 import org.slf4j.Logger;

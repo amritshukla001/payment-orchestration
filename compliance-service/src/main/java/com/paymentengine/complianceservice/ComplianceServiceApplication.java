@@ -1,4 +1,4 @@
-package com.paymentengine.complianceservice;
+package com.payflow.complianceservice;
 
 import io.swagger.v3.oas.annotations.OpenAPIDefinition;
 import io.swagger.v3.oas.annotations.enums.SecuritySchemeIn;
@@ -14,7 +14,7 @@ import org.springframework.kafka.annotation.EnableKafka;
 @EnableKafka
 @OpenAPIDefinition(
         info = @Info(
-                title = "Payment Processing Engine compliance-service",
+                title = "PayFlow compliance-service",
                 description = "Evaluates CHECK_COMPLIANCE commands (KYC verification, UPI-directory "
                         + "checks) and records AML-style regulatory reports for payments above a "
                         + "configured threshold, regardless of verdict.",

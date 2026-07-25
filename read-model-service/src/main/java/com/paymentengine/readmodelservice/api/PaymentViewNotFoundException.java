@@ -1,4 +1,4 @@
-package com.paymentengine.readmodelservice.api;
+package com.payflow.readmodelservice.api;
 
 import java.util.UUID;
 
