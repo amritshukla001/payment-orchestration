@@ -19,7 +19,7 @@ class AuthGlobalFilterTest {
 
     @Test
     void rejectsARequestWithNoApiKeyHeader() {
-        ServerWebExchange exchange = MockServerWebExchange.from(MockServerHttpRequest.get("/api/sagas").build());
+        ServerWebExchange exchange = MockServerWebExchange.from(MockServerHttpRequest.get("/api/payment-engine").build());
         AtomicBoolean chainInvoked = new AtomicBoolean(false);
 
         StepVerifier.create(filter.filter(exchange, markingChain(chainInvoked))).verifyComplete();
@@ -31,7 +31,7 @@ class AuthGlobalFilterTest {
     @Test
     void rejectsARequestWithTheWrongApiKeyHeader() {
         ServerWebExchange exchange = MockServerWebExchange.from(
-                MockServerHttpRequest.get("/api/sagas").header(AuthGlobalFilter.HEADER_NAME, "wrong-key").build());
+                MockServerHttpRequest.get("/api/payment-engine").header(AuthGlobalFilter.HEADER_NAME, "wrong-key").build());
         AtomicBoolean chainInvoked = new AtomicBoolean(false);
 
         StepVerifier.create(filter.filter(exchange, markingChain(chainInvoked))).verifyComplete();
@@ -43,7 +43,7 @@ class AuthGlobalFilterTest {
     @Test
     void passesThroughARequestWithTheCorrectApiKeyHeader() {
         ServerWebExchange exchange = MockServerWebExchange.from(
-                MockServerHttpRequest.get("/api/sagas").header(AuthGlobalFilter.HEADER_NAME, "expected-key").build());
+                MockServerHttpRequest.get("/api/payment-engine").header(AuthGlobalFilter.HEADER_NAME, "expected-key").build());
         AtomicBoolean chainInvoked = new AtomicBoolean(false);
 
         StepVerifier.create(filter.filter(exchange, markingChain(chainInvoked))).verifyComplete();

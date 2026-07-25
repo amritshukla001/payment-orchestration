@@ -20,7 +20,7 @@ import java.util.UUID;
 
 @RestController
 @RequestMapping("/payments")
-@Tag(name = "Payments", description = "Kicks off a payment saga and reports on its current state")
+@Tag(name = "Payments", description = "Kicks off a payment and reports on its current state")
 public class PaymentController {
 
     private final PaymentService paymentService;
@@ -34,7 +34,7 @@ public class PaymentController {
     @PostMapping
     @Operation(summary = "Initiate a payment",
             description = "Persists the payment and publishes an INITIATED event via the transactional "
-                    + "outbox, kicking off the saga. Idempotent on Idempotency-Key: a retried request with "
+                    + "outbox, kicking off the payment engine. Idempotent on Idempotency-Key: a retried request with "
                     + "the same key returns the original payment instead of creating a duplicate.")
     public ResponseEntity<PaymentResponse> initiate(
             @Parameter(description = "Client-generated key; retries with the same key are safe")
@@ -50,7 +50,7 @@ public class PaymentController {
     @GetMapping("/{id}")
     @Operation(summary = "Get a payment",
             description = "Returns payment-api's own record, stamped INITIATED at creation time. For the "
-                    + "saga's live, current state see GET /api/sagas/{paymentId} on saga-orchestrator.")
+                    + "payment's live, current state see GET /api/payment-engine/{paymentId} on payment-engine.")
     public PaymentResponse get(@PathVariable UUID id) {
         return PaymentResponse.from(paymentService.getById(id));
     }

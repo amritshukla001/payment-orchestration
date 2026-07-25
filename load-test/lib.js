@@ -1,4 +1,4 @@
-// Shared between payments-throughput-test.js and saga-completion-latency-test.js.
+// Shared between payments-throughput-test.js and payment-completion-latency-test.js.
 
 // Comfortably below the $9,000 settlement-decline / $10,000 fraud-reject
 // thresholds (SettlementRiskCheck / HighValueThresholdRule), so payloads

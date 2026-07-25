@@ -1,6 +1,6 @@
 import { useState } from "react";
 import { stateMeta } from "./states.js";
-import { fetchSagaSummary } from "./api.js";
+import { fetchPaymentEngineSummary } from "./api.js";
 
 function centsToAmount(cents, currency) {
   return new Intl.NumberFormat("en-US", {
@@ -23,7 +23,7 @@ function OutcomeBadge({ outcome }) {
 }
 
 // Only offered for COMPENSATED payments -- an on-demand, human-triggered
-// LLM call that explains the saga's history; it never decides anything.
+// LLM call that explains the payment's history; it never decides anything.
 // The source badge is honest about which path produced the text: the
 // Claude API, or the server's deterministic fallback template.
 function IncidentSummary({ paymentId }) {
@@ -32,7 +32,7 @@ function IncidentSummary({ paymentId }) {
   const generate = async () => {
     setState({ status: "loading", summary: null, error: null });
     try {
-      const summary = await fetchSagaSummary(paymentId);
+      const summary = await fetchPaymentEngineSummary(paymentId);
       setState({ status: "done", summary, error: null });
     } catch (e) {
       setState({ status: "error", summary: null, error: e.message });
@@ -64,7 +64,7 @@ function IncidentSummary({ paymentId }) {
 }
 
 export default function PaymentDrawer({ state, onClose }) {
-  const { saga, ledger, notifications, error } = state;
+  const { payment, ledger, notifications, error } = state;
   const loading = ledger === null;
 
   return (
@@ -73,7 +73,7 @@ export default function PaymentDrawer({ state, onClose }) {
         <div className="drawer__header">
           <div>
             <h2>Payment detail</h2>
-            <p className="mono drawer__id">{saga.paymentId}</p>
+            <p className="mono drawer__id">{payment.paymentId}</p>
           </div>
           <button className="drawer__close" onClick={onClose} aria-label="Close">
             ×
@@ -84,22 +84,22 @@ export default function PaymentDrawer({ state, onClose }) {
           <div>
             <dt>State</dt>
             <dd>
-              <span className={`badge badge--${stateMeta(saga.state).tone}`}>
-                {stateMeta(saga.state).label}
+              <span className={`badge badge--${stateMeta(payment.state).tone}`}>
+                {stateMeta(payment.state).label}
               </span>
             </dd>
           </div>
           <div>
             <dt>Amount</dt>
-            <dd className="mono">{centsToAmount(saga.amountCents, saga.currency)}</dd>
+            <dd className="mono">{centsToAmount(payment.amountCents, payment.currency)}</dd>
           </div>
           <div>
             <dt>Payer account</dt>
-            <dd className="mono">{saga.payerAccount}</dd>
+            <dd className="mono">{payment.payerAccount}</dd>
           </div>
           <div>
             <dt>Payee account</dt>
-            <dd className="mono">{saga.payeeAccount}</dd>
+            <dd className="mono">{payment.payeeAccount}</dd>
           </div>
         </dl>
 
@@ -131,7 +131,7 @@ export default function PaymentDrawer({ state, onClose }) {
                     <td className="mono">{entry.debitAccount.slice(0, 8)}…</td>
                     <td className="mono">{entry.creditAccount.slice(0, 8)}…</td>
                     <td className="mono numeric">
-                      {centsToAmount(entry.amountCents, saga.currency)}
+                      {centsToAmount(entry.amountCents, payment.currency)}
                     </td>
                     <td className="mono">
                       {new Date(entry.postedAt).toLocaleTimeString()}
@@ -143,7 +143,7 @@ export default function PaymentDrawer({ state, onClose }) {
           )}
         </section>
 
-        {saga.state === "COMPENSATED" && <IncidentSummary paymentId={saga.paymentId} />}
+        {payment.state === "COMPENSATED" && <IncidentSummary paymentId={payment.paymentId} />}
 
         <section className="drawer__section">
           <h3>Notifications</h3>

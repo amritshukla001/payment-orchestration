@@ -32,22 +32,22 @@ Only `http_req_failed` (< 1%) is gated as pass/fail. Read `http_req_duration`
 (p50/p95/p99) in the summary output — that's the actual "measured number"
 this exists to produce.
 
-## `saga-completion-latency-test.js`
+## `payment-completion-latency-test.js`
 
 `payments-throughput-test.js` only measures how fast the API *accepts* a
 payment (`202`, immediately — that's the point of the async outbox design).
-This script measures how long the *whole saga* takes to reach a terminal
+This script measures how long the *whole payment* takes to reach a terminal
 state (`SETTLED`, `FAILED`, or `COMPENSATED`): POST, then poll
 `GET /payments/{id}` every 250ms up to a 15s timeout. Runs at a light 5 req/s
 — well under the documented average — since it's measuring pipeline
 latency, not stress-testing intake.
 
 ```bash
-k6 run load-test/saga-completion-latency-test.js
+k6 run load-test/payment-completion-latency-test.js
 ```
 
-Reports a custom `saga_completion_seconds` trend metric, plus a
-`saga_completion_timeouts` counter for any payment that never reached a
+Reports a custom `payment_completion_seconds` trend metric, plus a
+`payment_completion_timeouts` counter for any payment that never reached a
 terminal state within 15s (a sign the pipeline is backing up, not something
 expected to fire at 5 req/s).
 

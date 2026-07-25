@@ -11,7 +11,7 @@ actually about, applied to original, non-proprietary domain logic.
 
 Structurally, a payment moves through a chain of independent services —
 fraud check, funds authorization, ledger posting, settlement,
-notification — coordinated by a saga orchestrator. That's one pattern
+notification — coordinated by a central payment engine. That's one pattern
 among several in play (see [Concepts & patterns demonstrated](#concepts--patterns-demonstrated)
 below) rather than the whole story. If any step fails, previously
 completed steps are unwound via compensating actions instead of leaving
@@ -22,7 +22,7 @@ the system in a half-done state.
 ```
 Client → Payment API (+ outbox) → Kafka: payment.events ⇄ Notification Service
                                           │                  (passive observer,
-                                   Saga Orchestrator          no command needed)
+                                   Payment Engine             no command needed)
                                           ⇄ Kafka: payment.commands
                                           │           │            │            │           │
                      ┌────────────────────┼───────────┼────────────┴───┬────────┴───┬───────┘
@@ -42,7 +42,7 @@ steps in the reverse order they were applied.
   publishes an event via the transactional outbox pattern (write + outbox
   row in one DB transaction, published by a separate poller) — avoids the
   dual-write problem between the database and Kafka.
-- **saga-orchestrator** — owns the payment's state machine. Consumes domain
+- **payment-engine** — owns the payment's state machine. Consumes domain
   events on `payment.events`, decides the next step, and issues commands on
   `payment.commands`. Keeps the whole lifecycle in one place instead of
   scattering it across every service's event handlers.
@@ -140,7 +140,7 @@ The saga aggregate used to be the opposite of event-sourced:
 `PaymentSagaState.advanceTo()` mutated a current-value `state` column in
 place (`payment_saga_state`, guarded by `@Version` optimistic locking).
 Kafka's `payment.events` carries facts *between* services but was never
-retained/replayable as saga-orchestrator's own system of record — a
+retained/replayable as payment-engine's own system of record — a
 restart with an empty database couldn't have rebuilt `state` from it.
 
 Now `payment_saga_events` is the actual system of record: one immutable
@@ -149,17 +149,17 @@ never updated or deleted — the same append-only discipline
 `ledger-service`'s `ledger_entries` already uses. `payer_account`,
 `payee_account`, `amount_cents`, and `currency` are only ever populated on
 the `sequence_number = 0` (`PAYMENT_INITIATED`) row, since nothing else
-about a payment changes after that. `PaymentSagaAggregate` — the same
+about a payment changes after that. `PaymentEngineAggregate` — the same
 shape `PaymentSagaState` used to be — is no longer persisted at all; it's
-a disposable projection reconstructed by `PaymentSagaAggregate.replay()`,
+a disposable projection reconstructed by `PaymentEngineAggregate.replay()`,
 folding the ordered event log into "what's true right now." Every decision
 `PaymentEventListener` makes is unchanged — it's the exact same state
 machine — only *how* each resulting fact gets stored changed, from
 "mutate + save one row" to "append one new row."
 
-This is a full replay on every read (`SagaEventStore.load()`/`.loadAll()`),
+This is a full replay on every read (`PaymentEngineEventStore.load()`/`.loadAll()`),
 not a `DISTINCT ON`-style optimized query — a deliberate choice. This
-aggregate's own read path (`GET /api/sagas`) doesn't need to be the fast
+aggregate's own read path (`GET /api/payment-engine`) doesn't need to be the fast
 one; [read-model-service](#cqrs-read-model) already exists as the actual
 scalable, denormalized read path the dashboard uses. Event Sourcing on the
 write side and CQRS on the read side turn out to be a natural pair: one
@@ -176,9 +176,9 @@ two events for the same payment concurrently. What replaces it is a
 
 ## AI Compensation Summaries
 
-When a payment ends in `COMPENSATED`, saga-orchestrator can turn its own
+When a payment ends in `COMPENSATED`, payment-engine can turn its own
 event-sourced transition log into a plain-English incident summary —
-`GET /api/sagas/{id}/summary`, surfaced in the dashboard drawer as a
+`GET /api/payment-engine/{id}/summary`, surfaced in the dashboard drawer as a
 "Generate summary" button on compensated payments. The pattern being
 demonstrated is **LLM explains, never decides**: every fraud, funds, and
 settlement decision in the saga stays fully deterministic; the model
@@ -204,7 +204,7 @@ final. Three deliberate constraints keep it production-shaped:
   dashboard, so it's always honest about which path produced the text.
 
 The prompt input is just `payment_saga_events` rendered as a compact text
-timeline (`SagaTimelineFormatter`) — a direct payoff of
+timeline (`PaymentEngineTimelineFormatter`) — a direct payoff of
 [event sourcing](#event-sourcing): the full incident history is one indexed
 query away, no cross-service joins needed.
 
@@ -269,7 +269,7 @@ only affects which compliance rule fires, not a new saga state.
 - **Database per service** — nine services, nine separate Postgres
   databases, no shared schema.
 - **Optimistic locking** — `@Version` on `Payment` and `Account` guards
-  concurrent writers without pessimistic locks. `PaymentSagaAggregate` no
+  concurrent writers without pessimistic locks. `PaymentEngineAggregate` no
   longer needs it (see [Event Sourcing](#event-sourcing) below) — an
   append-only log has nothing to race over updating.
 - **Schema evolution via versioned migrations** — a real schema change
@@ -295,8 +295,8 @@ only affects which compliance rule fires, not a new saga state.
   compliance-service's `ComplianceRule` mirrors the exact same shape with
   `KycVerificationRule`/`UpiDirectoryRule` (see
   [Compliance & Payment Methods](#compliance--payment-methods)).
-- **Mediator** — the saga orchestrator: fraud-service and funds-auth-service
-  never call each other directly, only the orchestrator.
+- **Mediator** — the payment engine: fraud-service and funds-auth-service
+  never call each other directly, only the payment engine.
 - **Command** — `CheckFraudCommand`, `AuthorizeFundsCommand`, etc. are
   requests encapsulated as objects; `ReleaseFundsCommand`/`ReverseLedgerCommand`
   are the literal *undo* counterparts to `AuthorizeFundsCommand`/`PostLedgerCommand`,
@@ -348,7 +348,7 @@ top of it.
   call. Each service's `KafkaConfig` explicitly enables Micrometer
   Observation (`setObservationEnabled(true)`) on both its listener container
   and its `KafkaTemplate`, which is what lets a single trace ID follow a
-  payment across `payment-api → saga-orchestrator → fraud-service →
+  payment across `payment-api → payment-engine → fraud-service →
   funds-auth-service → ledger-service → settlement-service` and back,
   stitched together over Kafka rather than lost at each broker hop.
 - The `/actuator/prometheus` endpoint sits behind the same `/actuator`
@@ -437,9 +437,9 @@ see a stale value, never the authorization decision.
 
 `api-gateway` (port 8088) is a Spring Cloud Gateway (reactive/WebFlux)
 service sitting in front of the six REST-exposing services — `payment-api`,
-`saga-orchestrator`, `ledger-service`, `notification-service`,
+`payment-engine`, `ledger-service`, `notification-service`,
 `read-model-service`, `compliance-service` — routing by path (`/payments/**`
-→ `payment-api`, `/api/sagas/**` → `saga-orchestrator`, `/api/ledger/**` →
+→ `payment-api`, `/api/payment-engine/**` → `payment-engine`, `/api/ledger/**` →
 `ledger-service`, `/api/notifications/**` → `notification-service`,
 `/api/payments/**` → `read-model-service`, `/api/compliance/**` →
 `compliance-service`). `fraud-service`, `funds-auth-service`, and
@@ -468,7 +468,7 @@ idempotent.
 
 CORS is now centralized via `spring.cloud.gateway.globalcors` instead of
 being duplicated per controller — the `@CrossOrigin` annotations on
-`SagaController`, `LedgerController`, and `NotificationController` are
+`PaymentEngineController`, `LedgerController`, and `NotificationController` are
 gone, since nothing browser-based calls those services directly anymore.
 
 `/actuator/gateway/routes` (exempted from auth like every other
@@ -528,7 +528,7 @@ rules exactly as intended, never blocks the saga.
 
 ## Containerization
 
-Every one of the 10 Spring Boot modules — `payment-api`, `saga-orchestrator`,
+Every one of the 10 Spring Boot modules — `payment-api`, `payment-engine`,
 `fraud-service`, `compliance-service`, `funds-auth-service`, `ledger-service`,
 `settlement-service`, `notification-service`, `read-model-service`,
 `api-gateway` — has its own `Dockerfile`, each a two-stage build:
@@ -589,7 +589,7 @@ monitoring config.
 Verified live end to end: built and started all 10 containers alongside the
 existing infra, sent a real payment through the containerized gateway
 (`:8088`), and watched it cross every container boundary — payment-api's
-Kafka command through saga-orchestrator, fraud-service, funds-auth-service
+Kafka command through payment-engine, fraud-service, funds-auth-service
 (Postgres *and* Redis), ledger-service, and settlement-service — to reach
 `SETTLED`, the same as the host-run version.
 
@@ -605,7 +605,7 @@ the dashboard: it subscribes to `payment.events`, projects a denormalized
 `payment_view` (plus `ledger_entry_view`/`notification_view` child tables)
 into its own Postgres database (`readmodel`), and exposes `GET /api/payments`
 / `GET /api/payments/{id}` — replacing three separate read APIs that used
-to live on `saga-orchestrator`, `ledger-service`, and `notification-service`
+to live on `payment-engine`, `ledger-service`, and `notification-service`
 and query each service's own write-side table directly. It's asynchronously
 consistent with, and fully decoupled from, those services' own transactional
 stores — none of them are queried at request time, and none of their own
@@ -649,7 +649,7 @@ is handled once at the gateway rather than per-controller. See
 ## Security
 
 Every REST endpoint across the six services that expose one — `payment-api`,
-`saga-orchestrator`, `ledger-service`, `notification-service`,
+`payment-engine`, `ledger-service`, `notification-service`,
 `read-model-service`, `compliance-service` — requires an `X-API-Key` header, checked by a shared
 `ApiKeyAuthFilter` in `common` that
 each service registers explicitly via its own `FilterRegistrationBean`
@@ -674,7 +674,7 @@ locally.
 ## Status
 
 **Built — all 9 core services, including real compensation, plus a live dashboard:**
-`payment-api`, `saga-orchestrator`, `fraud-service`, `compliance-service`,
+`payment-api`, `payment-engine`, `fraud-service`, `compliance-service`,
 `funds-auth-service`, `ledger-service`, `settlement-service`,
 `notification-service`, `read-model-service`. The full
 happy path works end to end — intake through fraud approval, funds
@@ -699,7 +699,7 @@ behind a circuit breaker (see [Caching](#caching)), a Spring Cloud
 Gateway edge service now fronts the REST-exposing services with
 centralized routing, auth, rate limiting, and CORS (see
 [API Gateway](#api-gateway)), every REST-exposing service (payment-api,
-saga-orchestrator, ledger-service, notification-service,
+payment-engine, ledger-service, notification-service,
 read-model-service) now serves a live OpenAPI spec and Swagger UI
 (`/v3/api-docs`, `/swagger-ui/index.html`) generated straight from its
 controllers, exempted from API-key auth the same way `/actuator` is so the
@@ -760,7 +760,7 @@ end — every phase since `fraud-service` has shipped with its own tests.
   FINAL, and REVERSAL legs), settlement-service's `SettleCommandListener`
   and `SettlementRiskCheck`, notification-service's `PaymentOutcomeListener`
   (both-parties-on-success, payer-only-on-failure-or-compensation), and —
-  the most important one — saga-orchestrator's `PaymentEventListener`,
+  the most important one — payment-engine's `PaymentEventListener`,
   covering every state transition — including the new `CHECK_COMPLIANCE`
   step and both its verdicts — plus the full compensation sequence
   (`SETTLEMENT_DECLINED → COMPENSATING → LEDGER_REVERSED → COMPENSATING →
@@ -770,7 +770,7 @@ end — every phase since `fraud-service` has shipped with its own tests.
   the **regression pack** for the saga: every scenario in it mirrors
   something that was previously verified by hand with curl + psql, now
   automated so a future change can't silently break it without CI catching it.
-  saga-orchestrator, settlement-service, notification-service, and
+  payment-engine, settlement-service, notification-service, and
   funds-auth-service's listener tests each also cover the resilience
   refactor: a collaborator failure now propagates out of the listener
   method instead of being silently swallowed, with `ack` never called —
@@ -805,9 +805,9 @@ doc](RESUME.md)'s capacity estimate — 20 payments/sec average, 100/sec peak
   those two documented rates back to back, reporting `http_req_duration`
   percentiles and gating on error rate (`< 1%`, since there's no stated
   latency SLA to gate on instead).
-- **`saga-completion-latency-test.js`** — measures the other half of the
+- **`payment-completion-latency-test.js`** — measures the other half of the
   picture: not how fast the API *accepts* a payment (that's instant, by
-  the outbox design), but how long the *whole saga* takes to actually
+  the outbox design), but how long the *whole payment* takes to actually
   reach `SETTLED`/`FAILED`/`COMPENSATED`, by polling after each POST.
 
 Requires `k6` (`brew install k6`) and the full stack running locally. See
@@ -832,7 +832,7 @@ mvn -DskipTests install
 
 # 3. Start each service (separate terminals)
 cd payment-api && mvn spring-boot:run          # :8080
-cd saga-orchestrator && mvn spring-boot:run    # :8082
+cd payment-engine && mvn spring-boot:run    # :8082
 cd fraud-service && mvn spring-boot:run        # :8083
 cd funds-auth-service && mvn spring-boot:run   # :8084
 cd ledger-service && mvn spring-boot:run       # :8085
@@ -868,7 +868,7 @@ at `/swagger-ui/index.html` on its own port — use the Authorize button with
 the API key to call endpoints from the page:
 
 - payment-api — http://localhost:8080/swagger-ui/index.html
-- saga-orchestrator — http://localhost:8082/swagger-ui/index.html
+- payment-engine — http://localhost:8082/swagger-ui/index.html
 - ledger-service — http://localhost:8085/swagger-ui/index.html
 - notification-service — http://localhost:8087/swagger-ui/index.html
 - read-model-service — http://localhost:8089/swagger-ui/index.html
@@ -974,7 +974,7 @@ Once it's `COMPENSATED`, generate the
 `"AI"`):
 
 ```bash
-curl -H "X-API-Key: local-dev-api-key-change-me" http://localhost:8088/api/sagas/<id>/summary
+curl -H "X-API-Key: local-dev-api-key-change-me" http://localhost:8088/api/payment-engine/<id>/summary
 ```
 
 Check saga progress directly (or just watch it live in the

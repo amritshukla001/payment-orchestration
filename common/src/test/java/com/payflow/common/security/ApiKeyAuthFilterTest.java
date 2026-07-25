@@ -38,7 +38,7 @@ class ApiKeyAuthFilterTest {
 
     @Test
     void allowsARequestWithTheCorrectKey() throws Exception {
-        when(request.getRequestURI()).thenReturn("/api/sagas");
+        when(request.getRequestURI()).thenReturn("/api/payment-engine");
         when(request.getHeader(ApiKeyAuthFilter.HEADER_NAME)).thenReturn(EXPECTED_KEY);
 
         filter.doFilter(request, response, chain);
@@ -49,7 +49,7 @@ class ApiKeyAuthFilterTest {
 
     @Test
     void rejectsARequestWithAMissingKey() throws Exception {
-        when(request.getRequestURI()).thenReturn("/api/sagas");
+        when(request.getRequestURI()).thenReturn("/api/payment-engine");
         when(request.getHeader(ApiKeyAuthFilter.HEADER_NAME)).thenReturn(null);
         when(response.getWriter()).thenReturn(new PrintWriter(new StringWriter()));
 
@@ -61,7 +61,7 @@ class ApiKeyAuthFilterTest {
 
     @Test
     void rejectsARequestWithTheWrongKey() throws Exception {
-        when(request.getRequestURI()).thenReturn("/api/sagas");
+        when(request.getRequestURI()).thenReturn("/api/payment-engine");
         when(request.getHeader(ApiKeyAuthFilter.HEADER_NAME)).thenReturn("wrong-key");
         when(response.getWriter()).thenReturn(new PrintWriter(new StringWriter()));
 

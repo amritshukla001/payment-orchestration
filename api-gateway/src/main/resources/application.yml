@@ -36,10 +36,10 @@ spring:
           uri: http://localhost:8080
           predicates:
             - Path=/payments/**
-        - id: saga-orchestrator
+        - id: payment-engine
           uri: http://localhost:8082
           predicates:
-            - Path=/api/sagas/**
+            - Path=/api/payment-engine/**
         - id: ledger-service
           uri: http://localhost:8085
           predicates:

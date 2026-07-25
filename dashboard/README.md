@@ -12,7 +12,7 @@ any write-side service's own table:
 | `GET /api/payments` | read-model-service | the live grid of payments and their current state |
 | `GET /api/payments/{paymentId}` | read-model-service | the detail drawer's ledger postings and notifications, in one call |
 
-Before the CQRS read model existed, the grid polled `saga-orchestrator`
+Before the CQRS read model existed, the grid polled `payment-engine`
 directly and the detail drawer made two further calls into `ledger-service`
 and `notification-service` — see the root README's
 [CQRS read model](../README.md#cqrs-read-model) section for why that

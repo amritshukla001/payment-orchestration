@@ -17,7 +17,7 @@ async function getJson(url) {
   return res.json();
 }
 
-// Backed by read-model-service's CQRS projection, not saga-orchestrator's
+// Backed by read-model-service's CQRS projection, not payment-engine's
 // own table -- one denormalized view built from payment.events.
 export function fetchPayments() {
   return getJson(`${GATEWAY_URL}/api/payments`);
@@ -31,9 +31,9 @@ export function fetchPaymentDetail(paymentId) {
 }
 
 // AI-generated incident summary for a COMPENSATED payment, served by
-// saga-orchestrator from its own event-sourced saga log. Generated once
+// payment-engine from its own event-sourced transition log. Generated once
 // and cached server-side; falls back to a deterministic template when the
 // Claude API is unavailable (response.source says which).
-export function fetchSagaSummary(paymentId) {
-  return getJson(`${GATEWAY_URL}/api/sagas/${paymentId}/summary`);
+export function fetchPaymentEngineSummary(paymentId) {
+  return getJson(`${GATEWAY_URL}/api/payment-engine/${paymentId}/summary`);
 }

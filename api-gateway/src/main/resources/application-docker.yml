@@ -29,10 +29,10 @@ spring:
           uri: http://payment-api:8080
           predicates:
             - Path=/payments/**
-        - id: saga-orchestrator
-          uri: http://saga-orchestrator:8082
+        - id: payment-engine
+          uri: http://payment-engine:8082
           predicates:
-            - Path=/api/sagas/**
+            - Path=/api/payment-engine/**
         - id: ledger-service
           uri: http://ledger-service:8085
           predicates:

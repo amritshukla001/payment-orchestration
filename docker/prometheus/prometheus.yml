@@ -9,10 +9,10 @@ scrape_configs:
     metrics_path: /actuator/prometheus
     static_configs:
       - targets: ["host.docker.internal:8080", "payment-api:8080"]
-  - job_name: saga-orchestrator
+  - job_name: payment-engine
     metrics_path: /actuator/prometheus
     static_configs:
-      - targets: ["host.docker.internal:8082", "saga-orchestrator:8082"]
+      - targets: ["host.docker.internal:8082", "payment-engine:8082"]
   - job_name: fraud-service
     metrics_path: /actuator/prometheus
     static_configs:

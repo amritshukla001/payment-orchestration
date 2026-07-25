@@ -37,7 +37,7 @@
   <modules>
     <module>common</module>
     <module>payment-api</module>
-    <module>saga-orchestrator</module>
+    <module>payment-engine</module>
     <module>fraud-service</module>
     <module>compliance-service</module>
     <module>funds-auth-service</module>

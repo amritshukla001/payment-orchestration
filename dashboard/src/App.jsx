@@ -52,7 +52,7 @@ function shortId(id) {
 }
 
 export default function App() {
-  const [sagas, setSagas] = useState([]);
+  const [payments, setPayments] = useState([]);
   const [error, setError] = useState(null);
   const [lastRefreshed, setLastRefreshed] = useState(null);
   const [selected, setSelected] = useState(null);
@@ -61,7 +61,7 @@ export default function App() {
   const load = useCallback(async () => {
     try {
       const data = await fetchPayments();
-      setSagas(data);
+      setPayments(data);
       setError(null);
       setLastRefreshed(new Date());
     } catch (e) {
@@ -77,9 +77,9 @@ export default function App() {
 
   const summary = useMemo(() => {
     const counts = {};
-    for (const s of sagas) counts[s.state] = (counts[s.state] ?? 0) + 1;
+    for (const s of payments) counts[s.state] = (counts[s.state] ?? 0) + 1;
     return counts;
-  }, [sagas]);
+  }, [payments]);
 
   const columnDefs = useMemo(
     () => [
@@ -138,13 +138,13 @@ export default function App() {
     [],
   );
 
-  const openDetail = useCallback(async (saga) => {
-    setSelected({ saga, ledger: null, notifications: null, error: null });
+  const openDetail = useCallback(async (payment) => {
+    setSelected({ payment, ledger: null, notifications: null, error: null });
     try {
-      const detail = await fetchPaymentDetail(saga.paymentId);
-      setSelected({ saga: detail.payment, ledger: detail.ledgerEntries, notifications: detail.notifications, error: null });
+      const detail = await fetchPaymentDetail(payment.paymentId);
+      setSelected({ payment: detail.payment, ledger: detail.ledgerEntries, notifications: detail.notifications, error: null });
     } catch (e) {
-      setSelected({ saga, ledger: [], notifications: [], error: e.message });
+      setSelected({ payment, ledger: [], notifications: [], error: e.message });
     }
   }, []);
 
@@ -166,7 +166,7 @@ export default function App() {
             </span>
           ) : (
             <span className="status status--ok">
-              {sagas.length} payments tracked
+              {payments.length} payments tracked
             </span>
           )}
           <span className="console__refreshed">
@@ -191,7 +191,7 @@ export default function App() {
           <AgGridReact
             ref={gridRef}
             theme={gridTheme}
-            rowData={sagas}
+            rowData={payments}
             columnDefs={columnDefs}
             getRowId={(p) => p.data.paymentId}
             onRowClicked={(e) => openDetail(e.data)}

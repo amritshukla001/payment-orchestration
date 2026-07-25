@@ -3,7 +3,7 @@ WORKDIR /workspace
 COPY pom.xml .
 COPY common/pom.xml common/pom.xml
 COPY payment-api/pom.xml payment-api/pom.xml
-COPY saga-orchestrator/pom.xml saga-orchestrator/pom.xml
+COPY payment-engine/pom.xml payment-engine/pom.xml
 COPY fraud-service/pom.xml fraud-service/pom.xml
 COPY compliance-service/pom.xml compliance-service/pom.xml
 COPY funds-auth-service/pom.xml funds-auth-service/pom.xml

@@ -20,7 +20,7 @@ import java.util.UUID;
 /**
  * The CQRS read side for the dashboard: a single denormalized view, built
  * entirely from payment.events by ProjectionEventListener, replacing three
- * separate calls into saga-orchestrator/ledger-service/notification-service.
+ * separate calls into payment-engine/ledger-service/notification-service.
  */
 @RestController
 @RequestMapping("/api/payments")
