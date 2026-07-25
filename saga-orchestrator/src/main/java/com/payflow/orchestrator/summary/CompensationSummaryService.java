@@ -25,16 +25,16 @@ public class CompensationSummaryService {
     private final SagaEventRepository sagaEventRepository;
     private final SagaSummaryRepository sagaSummaryRepository;
     private final SagaTimelineFormatter timelineFormatter;
-    private final ClaudeSummaryClient claudeSummaryClient;
+    private final GeminiSummaryClient geminiSummaryClient;
 
     public CompensationSummaryService(SagaEventRepository sagaEventRepository,
                                        SagaSummaryRepository sagaSummaryRepository,
                                        SagaTimelineFormatter timelineFormatter,
-                                       ClaudeSummaryClient claudeSummaryClient) {
+                                       GeminiSummaryClient geminiSummaryClient) {
         this.sagaEventRepository = sagaEventRepository;
         this.sagaSummaryRepository = sagaSummaryRepository;
         this.timelineFormatter = timelineFormatter;
-        this.claudeSummaryClient = claudeSummaryClient;
+        this.geminiSummaryClient = geminiSummaryClient;
     }
 
     public SagaSummary summarize(UUID paymentId) {
@@ -48,7 +48,7 @@ public class CompensationSummaryService {
             throw new SummaryUnavailableException(paymentId, "No saga found for payment " + paymentId, true);
         }
 
-        SagaEvent last = events.get(events.size() - 1);
+        SagaEvent last = events.getLast();
         if (!PaymentState.COMPENSATED.name().equals(last.getToState())) {
             throw new SummaryUnavailableException(paymentId,
                     "Payment " + paymentId + " is " + last.getToState()
@@ -56,7 +56,7 @@ public class CompensationSummaryService {
         }
 
         String timeline = timelineFormatter.format(events);
-        String aiSummary = claudeSummaryClient.summarize(timeline);
+        String aiSummary = geminiSummaryClient.summarize(timeline);
 
         SagaSummary summary = aiSummary != null
                 ? new SagaSummary(paymentId, aiSummary, SagaSummary.Source.AI, Instant.now())
@@ -65,12 +65,12 @@ public class CompensationSummaryService {
     }
 
     private String deterministicSummary(List<SagaEvent> events) {
-        SagaEvent first = events.get(0);
+        SagaEvent first = events.getFirst();
         SagaEvent trigger = events.stream()
                 .filter(e -> PaymentState.COMPENSATING.name().equals(e.getToState()))
                 .findFirst()
                 .orElse(null);
-        SagaEvent last = events.get(events.size() - 1);
+        SagaEvent last = events.getLast();
 
         StringBuilder sb = new StringBuilder();
         sb.append("Payment ").append(first.getPaymentId())

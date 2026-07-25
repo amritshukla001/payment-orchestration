@@ -174,10 +174,10 @@ event-sourced transition log into a plain-English incident summary —
 `GET /api/sagas/{id}/summary`, surfaced in the dashboard drawer as a
 "Generate summary" button on compensated payments. The pattern being
 demonstrated is **LLM explains, never decides**: every fraud, funds, and
-settlement decision in the saga stays fully deterministic; the model (the
-Claude API, via the official Anthropic Java SDK) only narrates a history
-that is already final. Three deliberate constraints keep it
-production-shaped:
+settlement decision in the saga stays fully deterministic; the model
+(Google's Gemini API, called via a plain `RestClient` — chosen because its
+free tier needs no billing setup) only narrates a history that is already
+final. Three deliberate constraints keep it production-shaped:
 
 - **Out of the hot path.** The LLM is never called from a Kafka listener —
   generation is on-demand, triggered by a human clicking a button. A slow
@@ -187,11 +187,11 @@ production-shaped:
   every repeat button click — serves the stored row. LLM cost is bounded at
   one call per compensated payment.
 - **Graceful degradation, same pattern as the
-  [ML Fraud Risk Scorer](#ml-fraud-risk-scorer).** The Claude call sits
+  [ML Fraud Risk Scorer](#ml-fraud-risk-scorer).** The Gemini call sits
   behind a Resilience4j circuit breaker (`ai-summarizer`) on its own bean
-  (`ClaudeSummaryClient` — separate from the caller so Spring's AOP proxy
+  (`GeminiSummaryClient` — separate from the caller so Spring's AOP proxy
   actually intercepts it). API down, rate-limited, circuit open, or no
-  `ANTHROPIC_API_KEY` configured at all: the endpoint still answers, with a
+  `GEMINI_API_KEY` configured at all: the endpoint still answers, with a
   deterministic template built from the same event log. The response's
   `source` field (`AI` vs `DETERMINISTIC`) is surfaced as a badge in the
   dashboard, so it's always honest about which path produced the text.
@@ -666,7 +666,7 @@ aggregate itself is now [event-sourced](#event-sourcing) too:
 mutable column — `PaymentSagaState` no longer exists. And that event log
 now feeds [AI Compensation Summaries](#ai-compensation-summaries): a
 compensated payment's transition history can be turned into a plain-English
-incident note on demand via the Claude API — LLM explains, never decides —
+incident note on demand via the Gemini API — LLM explains, never decides —
 circuit-breaker-guarded with a deterministic fallback so the endpoint works
 with no API key at all.
 
@@ -681,7 +681,7 @@ reads as production-grade:
 Rougher than the roadmap above — directions being considered, not committed to:
 
 - **Real velocity/behavioral features via a cross-service event** — the [ML Fraud Risk Scorer](#ml-fraud-risk-scorer)'s velocity/deviation features are computed from fraud-service's own local history, deliberately avoiding a synchronous call to funds-auth-service (which is Kafka-only by design). A fuller version would have funds-auth-service publish account-lifecycle events and let fraud-service build a local read model from them — more consistent with this project's event-driven style than adding a new synchronous REST call — could also double as infrastructure for [read-model-service](#cqrs-read-model), one feature store serving both the dashboard and fraud features.
-- **LLM-generated fraud explanations, not decisions** — when fraud-service rejects a payment, turn the triggering rule + context into a human-readable reason for the notification/audit trail via an LLM call. The same LLM-explains-not-decides pattern that [AI Compensation Summaries](#ai-compensation-summaries) now applies to the compensation path, applied to the fraud path instead — `ClaudeSummaryClient`'s circuit-breaker-plus-fallback shape would carry over directly.
+- **LLM-generated fraud explanations, not decisions** — when fraud-service rejects a payment, turn the triggering rule + context into a human-readable reason for the notification/audit trail via an LLM call. The same LLM-explains-not-decides pattern that [AI Compensation Summaries](#ai-compensation-summaries) now applies to the compensation path, applied to the fraud path instead — `GeminiSummaryClient`'s circuit-breaker-plus-fallback shape would carry over directly.
 
 ## Testing
 
@@ -857,8 +857,8 @@ curl -H "X-API-Key: local-dev-api-key-change-me" http://localhost:8080/payments/
 ```
 
 Once it's `COMPENSATED`, generate the
-[AI incident summary](#ai-compensation-summaries) (works without an
-`ANTHROPIC_API_KEY` too — you'll get `"source": "DETERMINISTIC"` instead of
+[AI incident summary](#ai-compensation-summaries) (works without a
+`GEMINI_API_KEY` too — you'll get `"source": "DETERMINISTIC"` instead of
 `"AI"`):
 
 ```bash
@@ -912,4 +912,4 @@ curl -H "X-API-Key: local-dev-api-key-change-me" http://localhost:8088/api/payme
 Java 21 · Spring Boot 3.3.13 · Maven (multi-module) · PostgreSQL 16 · Flyway ·
 Apache Kafka 3.7 (KRaft) · Kafka UI · Docker Compose · Hibernate / Spring Data JPA ·
 Micrometer / Prometheus · OpenTelemetry / Zipkin · Resilience4j · k6 · Redis ·
-Spring Cloud Gateway · springdoc-openapi / Swagger UI · Anthropic Java SDK (Claude API)
+Spring Cloud Gateway · springdoc-openapi / Swagger UI · Google Gemini API

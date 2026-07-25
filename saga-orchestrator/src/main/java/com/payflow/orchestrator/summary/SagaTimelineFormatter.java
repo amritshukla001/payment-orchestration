@@ -14,7 +14,7 @@ import java.util.List;
 public class SagaTimelineFormatter {
 
     public String format(List<SagaEvent> events) {
-        SagaEvent first = events.get(0);
+        SagaEvent first = events.getFirst();
         StringBuilder sb = new StringBuilder();
         sb.append("Payment ").append(first.getPaymentId()).append('\n');
         sb.append("Amount: ").append(formatAmount(first.getAmountCents(), first.getCurrency())).append('\n');

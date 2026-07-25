@@ -55,6 +55,9 @@ payflow:
     api-key: ${PAYFLOW_API_KEY:local-dev-api-key-change-me}
   ai:
     # Empty default is a normal local-dev state: the summary endpoint then
-    # serves the deterministic fallback instead of calling the Claude API.
-    api-key: ${ANTHROPIC_API_KEY:}
-    model: claude-opus-4-8
+    # serves the deterministic fallback instead of calling the Gemini API.
+    # Get a free key at https://aistudio.google.com/apikey -- no billing
+    # required for the free tier. If this model name is retired, check
+    # https://ai.google.dev/gemini-api/docs/models for a current one.
+    api-key: ${GEMINI_API_KEY:}
+    model: gemini-3.1-flash-lite

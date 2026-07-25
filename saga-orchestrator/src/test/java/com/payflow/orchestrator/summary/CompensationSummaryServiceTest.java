@@ -30,14 +30,14 @@ class CompensationSummaryServiceTest {
     @Mock
     private SagaSummaryRepository sagaSummaryRepository;
     @Mock
-    private ClaudeSummaryClient claudeSummaryClient;
+    private GeminiSummaryClient geminiSummaryClient;
 
     private CompensationSummaryService service;
 
     @BeforeEach
     void setUp() {
         service = new CompensationSummaryService(sagaEventRepository, sagaSummaryRepository,
-                new SagaTimelineFormatter(), claudeSummaryClient);
+                new SagaTimelineFormatter(), geminiSummaryClient);
         lenient().when(sagaSummaryRepository.save(any())).thenAnswer(inv -> inv.getArgument(0));
     }
 
@@ -47,7 +47,7 @@ class CompensationSummaryServiceTest {
         when(sagaSummaryRepository.findById(paymentId)).thenReturn(Optional.empty());
         when(sagaEventRepository.findByPaymentIdOrderBySequenceNumberAsc(paymentId))
                 .thenReturn(compensatedLog(paymentId));
-        when(claudeSummaryClient.summarize(anyString()))
+        when(geminiSummaryClient.summarize(anyString()))
                 .thenReturn("A $9,500 payment was reversed after settlement declined.");
 
         SagaSummary summary = service.summarize(paymentId);
@@ -58,12 +58,12 @@ class CompensationSummaryServiceTest {
     }
 
     @Test
-    void claudeUnavailableFallsBackToDeterministicSummary() {
+    void geminiUnavailableFallsBackToDeterministicSummary() {
         UUID paymentId = UUID.randomUUID();
         when(sagaSummaryRepository.findById(paymentId)).thenReturn(Optional.empty());
         when(sagaEventRepository.findByPaymentIdOrderBySequenceNumberAsc(paymentId))
                 .thenReturn(compensatedLog(paymentId));
-        when(claudeSummaryClient.summarize(anyString())).thenReturn(null);
+        when(geminiSummaryClient.summarize(anyString())).thenReturn(null);
 
         SagaSummary summary = service.summarize(paymentId);
 
@@ -76,7 +76,7 @@ class CompensationSummaryServiceTest {
     }
 
     @Test
-    void cachedSummaryIsReturnedWithoutCallingClaudeAgain() {
+    void cachedSummaryIsReturnedWithoutCallingGeminiAgain() {
         UUID paymentId = UUID.randomUUID();
         SagaSummary cached = new SagaSummary(paymentId, "cached text", SagaSummary.Source.AI, Instant.now());
         when(sagaSummaryRepository.findById(paymentId)).thenReturn(Optional.of(cached));
@@ -84,7 +84,7 @@ class CompensationSummaryServiceTest {
         SagaSummary summary = service.summarize(paymentId);
 
         assertThat(summary).isSameAs(cached);
-        verifyNoInteractions(claudeSummaryClient);
+        verifyNoInteractions(geminiSummaryClient);
         verify(sagaSummaryRepository, never()).save(any());
     }
 
@@ -97,7 +97,7 @@ class CompensationSummaryServiceTest {
         assertThatThrownBy(() -> service.summarize(paymentId))
                 .isInstanceOf(SummaryUnavailableException.class)
                 .matches(e -> ((SummaryUnavailableException) e).isNotFound());
-        verifyNoInteractions(claudeSummaryClient);
+        verifyNoInteractions(geminiSummaryClient);
     }
 
     @Test
@@ -115,21 +115,21 @@ class CompensationSummaryServiceTest {
                 .isInstanceOf(SummaryUnavailableException.class)
                 .matches(e -> !((SummaryUnavailableException) e).isNotFound())
                 .hasMessageContaining("SETTLED");
-        verifyNoInteractions(claudeSummaryClient);
+        verifyNoInteractions(geminiSummaryClient);
     }
 
     @Test
-    void timelineHandedToClaudeContainsTheFullTransitionLog() {
+    void timelineHandedToGeminiContainsTheFullTransitionLog() {
         UUID paymentId = UUID.randomUUID();
         when(sagaSummaryRepository.findById(paymentId)).thenReturn(Optional.empty());
         when(sagaEventRepository.findByPaymentIdOrderBySequenceNumberAsc(paymentId))
                 .thenReturn(compensatedLog(paymentId));
-        when(claudeSummaryClient.summarize(anyString())).thenReturn("summary");
+        when(geminiSummaryClient.summarize(anyString())).thenReturn("summary");
 
         service.summarize(paymentId);
 
         ArgumentCaptor<String> captor = ArgumentCaptor.forClass(String.class);
-        verify(claudeSummaryClient).summarize(captor.capture());
+        verify(geminiSummaryClient).summarize(captor.capture());
         assertThat(captor.getValue())
                 .contains("PAYMENT_INITIATED")
                 .contains("SETTLEMENT_DECLINED -> COMPENSATING")
