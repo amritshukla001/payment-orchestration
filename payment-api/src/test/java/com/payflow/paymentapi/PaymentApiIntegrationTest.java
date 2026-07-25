@@ -68,7 +68,7 @@ class PaymentApiIntegrationTest {
     void postingAPaymentPersistsItPublishesToKafkaAndIsIdempotent() {
         String idempotencyKey = "it-" + UUID.randomUUID();
         String body = """
-                {"payerAccount":"%s","payeeAccount":"%s","amountCents":2500,"currency":"USD"}
+                {"payerAccount":"%s","payeeAccount":"%s","amountCents":2500,"currency":"USD","paymentMethod":"NETBANKING"}
                 """.formatted(UUID.randomUUID(), UUID.randomUUID());
 
         HttpHeaders headers = new HttpHeaders();

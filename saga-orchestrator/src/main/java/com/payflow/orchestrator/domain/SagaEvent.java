@@ -12,9 +12,9 @@ import java.util.UUID;
  * same append-only discipline as ledger-service's LedgerEntry. This is the
  * saga's actual system of record; PaymentSagaAggregate is a disposable
  * projection folded from these rows on read, not persisted itself.
- * payerAccount/payeeAccount/amountCents/currency are only ever populated on
- * the sequenceNumber = 0 (PAYMENT_INITIATED) row, since those fields never
- * change afterward -- every later row leaves them null.
+ * payerAccount/payeeAccount/amountCents/currency/paymentMethod are only
+ * ever populated on the sequenceNumber = 0 (PAYMENT_INITIATED) row, since
+ * those fields never change afterward -- every later row leaves them null.
  */
 @Entity
 @Table(name = "payment_saga_events")
@@ -47,6 +47,9 @@ public class SagaEvent {
     @Column(length = 3)
     private String currency;
 
+    @Column(name = "payment_method", length = 16)
+    private String paymentMethod;
+
     @Column(name = "occurred_at", nullable = false)
     private Instant occurredAt;
 
@@ -55,7 +58,8 @@ public class SagaEvent {
     }
 
     public SagaEvent(UUID id, UUID paymentId, int sequenceNumber, String eventType, String toState,
-                      UUID payerAccount, UUID payeeAccount, Long amountCents, String currency, Instant occurredAt) {
+                      UUID payerAccount, UUID payeeAccount, Long amountCents, String currency,
+                      String paymentMethod, Instant occurredAt) {
         this.id = id;
         this.paymentId = paymentId;
         this.sequenceNumber = sequenceNumber;
@@ -65,6 +69,7 @@ public class SagaEvent {
         this.payeeAccount = payeeAccount;
         this.amountCents = amountCents;
         this.currency = currency;
+        this.paymentMethod = paymentMethod;
         this.occurredAt = occurredAt;
     }
 
@@ -102,6 +107,10 @@ public class SagaEvent {
 
     public String getCurrency() {
         return currency;
+    }
+
+    public String getPaymentMethod() {
+        return paymentMethod;
     }
 
     public Instant getOccurredAt() {

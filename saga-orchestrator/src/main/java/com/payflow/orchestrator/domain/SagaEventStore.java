@@ -51,14 +51,15 @@ public class SagaEventStore {
     }
 
     public void appendInitiated(UUID paymentId, UUID payerAccount, UUID payeeAccount, long amountCents,
-                                 String currency, Instant occurredAt) {
+                                 String currency, String paymentMethod, Instant occurredAt) {
         repository.save(new SagaEvent(UUID.randomUUID(), paymentId, 0, "PAYMENT_INITIATED",
-                PaymentState.INITIATED.name(), payerAccount, payeeAccount, amountCents, currency, occurredAt));
+                PaymentState.INITIATED.name(), payerAccount, payeeAccount, amountCents, currency,
+                paymentMethod, occurredAt));
     }
 
     public void append(PaymentSagaAggregate aggregate, String triggeringEventType, PaymentState toState,
                         Instant occurredAt) {
         repository.save(new SagaEvent(UUID.randomUUID(), aggregate.getPaymentId(), aggregate.nextSequenceNumber(),
-                triggeringEventType, toState.name(), null, null, null, null, occurredAt));
+                triggeringEventType, toState.name(), null, null, null, null, null, occurredAt));
     }
 }

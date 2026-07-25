@@ -24,12 +24,12 @@ Client → Payment API (+ outbox) → Kafka: payment.events ⇄ Notification Ser
                                           │                  (passive observer,
                                    Saga Orchestrator          no command needed)
                                           ⇄ Kafka: payment.commands
-                                          │           │            │           │
-                          ┌───────────────┼───────────┴───┬────────┴───┬───────┘
-                          ▼               ▼                ▼           ▼
-                    Fraud Service   Funds Auth        Ledger        Settlement
-                                                       Service        Service
-                                                                        │
+                                          │           │            │            │           │
+                     ┌────────────────────┼───────────┼────────────┴───┬────────┴───┬───────┘
+                     ▼                    ▼           ▼                 ▼           ▼
+              Compliance Service   Fraud Service  Funds Auth        Ledger        Settlement
+                                                                     Service        Service
+                                                                                      │
                                     (happy path loops back with POST_FINAL_LEDGER)
 ```
 
@@ -46,6 +46,13 @@ steps in the reverse order they were applied.
   events on `payment.events`, decides the next step, and issues commands on
   `payment.commands`. Keeps the whole lifecycle in one place instead of
   scattering it across every service's event handlers.
+- **compliance-service** — the first gate a payment passes through (see
+  [Compliance & Payment Methods](#compliance--payment-methods)): consumes
+  `CHECK_COMPLIANCE` commands, evaluates independent rule strategies
+  (`ComplianceRule` implementations, the same Strategy pattern as
+  fraud-service), records an AML-style regulatory report for high-value
+  amounts regardless of verdict, and publishes the verdict back onto
+  `payment.events`.
 - **fraud-service** — consumes `CHECK_FRAUD` commands, evaluates independent
   rule strategies (`FraudRule` implementations, Strategy pattern), publishes
   the verdict back onto `payment.events`.
@@ -92,10 +99,10 @@ at-least-once delivery, so idempotent processing is what makes redelivery
 safe rather than a source of duplicate work.
 
 Each service owns its own Postgres database (`payflow`, `orchestrator`,
-`fraud`, `fundsauth`, `ledger`, `settlement`, `notification`, `readmodel`),
-even though they currently share one container for local-dev convenience —
-mirrors "database per service" without needing a separate Postgres instance
-per service.
+`fraud`, `fundsauth`, `ledger`, `settlement`, `notification`, `readmodel`,
+`compliance`), even though they currently share one container for local-dev
+convenience — mirrors "database per service" without needing a separate
+Postgres instance per service.
 
 ## Compensation
 
@@ -201,6 +208,51 @@ timeline (`SagaTimelineFormatter`) — a direct payoff of
 [event sourcing](#event-sourcing): the full incident history is one indexed
 query away, no cross-service joins needed.
 
+## Compliance & Payment Methods
+
+Two of the honest gaps this project used to have — no compliance/regulatory
+layer, and only one implicit payment method — are addressed together,
+since real compliance requirements differ *by* payment method: a new
+`PaymentMethod` field (`CARD`, `UPI`, `NETBANKING`, set once at intake and
+carried through the saga like `currency`) flows into a new 10th service,
+**compliance-service**, which sits as the saga's first gate — before fraud,
+not after, since account standing is more fundamental than transaction-level
+risk scoring. `PAYMENT_INITIATED` now issues `CHECK_COMPLIANCE` instead of
+`CHECK_FRAUD` directly; only a `COMPLIANCE_APPROVED` verdict (new
+`COMPLIANCE_CHECKED` state) advances to the fraud check that used to run
+first.
+
+Two independent `ComplianceRule` strategies (Strategy pattern, mirroring
+`FraudRule` exactly):
+
+- **`KycVerificationRule`** — both payer and payee must be KYC-verified.
+  Accounts are lazily provisioned as `verified=true` on first sight (the
+  same lazy-provisioning pattern funds-auth-service's `Account` already
+  uses), so every existing demo flow keeps working unchanged. A specific
+  account is routed to a compliance rejection only by explicitly flagging
+  it first (`POST /api/compliance/accounts/{accountId}/flag`) — the same
+  "clear, deliberate trigger" pattern this project already uses elsewhere
+  (e.g. settlement's $9k–$10k decline range), not a restrictive default.
+- **`UpiDirectoryRule`** — only fires for `UPI`-method payments; rejects
+  unless the payee account has been explicitly registered
+  (`POST /api/compliance/upi/{accountId}/register`) — mirrors "you can only
+  pay a registered VPA." Deliberately the opposite default from KYC: absence
+  means not registered, no lazy auto-registration, since a payment-method
+  directory shouldn't silently admit every account.
+
+Independently of the verdict, any payment whose amount crosses a configured
+threshold (`compliance.aml-threshold-cents`, default $10,000) gets an
+append-only `RegulatoryReport` row recorded — real CTR-style filing happens
+on the attempted transaction, not just approved ones, so this always runs
+before the rule engine's verdict is even evaluated. `GET
+/api/compliance/reports` lists every recorded report for audit visibility.
+
+**Deliberately out of scope** (a natural follow-up, not built here): a
+genuinely asynchronous CARD step-up/2FA confirmation — a saga pause,
+external resume endpoint, and timeout handling — is a real, distinct
+pattern, but a substantially larger addition than this slice; `CARD` today
+only affects which compliance rule fires, not a new saga state.
+
 ## Concepts & patterns demonstrated
 
 **Distributed systems / HLD**
@@ -214,7 +266,7 @@ query away, no cross-service joins needed.
   a database and Kafka.
 - **Idempotent Consumer** — every consumer checks its own `processed_events`
   table before acting, since Kafka only guarantees at-least-once delivery.
-- **Database per service** — eight services, eight separate Postgres
+- **Database per service** — nine services, nine separate Postgres
   databases, no shared schema.
 - **Optimistic locking** — `@Version` on `Payment` and `Account` guards
   concurrent writers without pessimistic locks. `PaymentSagaAggregate` no
@@ -240,6 +292,9 @@ query away, no cross-service joins needed.
   `HighValueThresholdRule`, `PositiveAmountRule`, and `MlRiskScoreRule` as
   independent `@Component` beans Spring autowires into the engine's rule
   list, ordered via `@Order` (see [ML Fraud Risk Scorer](#ml-fraud-risk-scorer)).
+  compliance-service's `ComplianceRule` mirrors the exact same shape with
+  `KycVerificationRule`/`UpiDirectoryRule` (see
+  [Compliance & Payment Methods](#compliance--payment-methods)).
 - **Mediator** — the saga orchestrator: fraud-service and funds-auth-service
   never call each other directly, only the orchestrator.
 - **Command** — `CheckFraudCommand`, `AuthorizeFundsCommand`, etc. are
@@ -281,7 +336,7 @@ top of it.
 - **Metrics** — JVM, HTTP request, and Hikari connection-pool metrics are
   auto-instrumented by Actuator with no code changes. `docker compose`
   brings up a `prometheus` container (`docker/prometheus/prometheus.yml`)
-  that scrapes all nine services on their host ports via
+  that scrapes all ten services on their host ports via
   `host.docker.internal`, since services run on the host via
   `mvn spring-boot:run` rather than inside the compose network. Browse
   metrics/targets at http://localhost:9090.
@@ -381,12 +436,13 @@ see a stale value, never the authorization decision.
 ## API Gateway
 
 `api-gateway` (port 8088) is a Spring Cloud Gateway (reactive/WebFlux)
-service sitting in front of the five REST-exposing services — `payment-api`,
+service sitting in front of the six REST-exposing services — `payment-api`,
 `saga-orchestrator`, `ledger-service`, `notification-service`,
-`read-model-service` — routing by path (`/payments/**` → `payment-api`,
-`/api/sagas/**` → `saga-orchestrator`, `/api/ledger/**` → `ledger-service`,
-`/api/notifications/**` → `notification-service`, `/api/payments/**` →
-`read-model-service`). `fraud-service`, `funds-auth-service`, and
+`read-model-service`, `compliance-service` — routing by path (`/payments/**`
+→ `payment-api`, `/api/sagas/**` → `saga-orchestrator`, `/api/ledger/**` →
+`ledger-service`, `/api/notifications/**` → `notification-service`,
+`/api/payments/**` → `read-model-service`, `/api/compliance/**` →
+`compliance-service`). `fraud-service`, `funds-auth-service`, and
 `settlement-service` are Kafka-only and have nothing to route to.
 
 A custom `AuthGlobalFilter` validates `X-API-Key` at the edge before a
@@ -472,15 +528,16 @@ rules exactly as intended, never blocks the saga.
 
 ## Containerization
 
-Every one of the 9 Spring Boot modules — `payment-api`, `saga-orchestrator`,
-`fraud-service`, `funds-auth-service`, `ledger-service`, `settlement-service`,
-`notification-service`, `read-model-service`, `api-gateway` — has its own
-`Dockerfile`, each a two-stage build: `maven:3.9-eclipse-temurin-21` compiles
-the jar (there's no Maven wrapper in this repo, so the build stage needs the
-image's own Maven), then a slim `eclipse-temurin:21-jre-alpine` runtime stage
-just copies it in. `docker-compose.yml` builds and runs all 9 alongside the
-existing infra, so `docker compose up --build` is now a complete alternative
-to running `mvn spring-boot:run` per service — see
+Every one of the 10 Spring Boot modules — `payment-api`, `saga-orchestrator`,
+`fraud-service`, `compliance-service`, `funds-auth-service`, `ledger-service`,
+`settlement-service`, `notification-service`, `read-model-service`,
+`api-gateway` — has its own `Dockerfile`, each a two-stage build:
+`maven:3.9-eclipse-temurin-21` compiles the jar (there's no Maven wrapper in
+this repo, so the build stage needs the image's own Maven), then a slim
+`eclipse-temurin:21-jre-alpine` runtime stage just copies it in.
+`docker-compose.yml` builds and runs all 10 alongside the existing infra, so
+`docker compose up --build` is now a complete alternative to running
+`mvn spring-boot:run` per service — see
 [Running it locally](#running-it-locally) for both. The `mvn spring-boot:run`
 workflow isn't going away; it's still the faster loop for active
 development, this is just a second way to run the whole thing with nothing
@@ -489,7 +546,7 @@ but Docker installed.
 Each service's build context is the **repo root**, not its own directory:
 `common` (the shared library every service depends on) has no published
 artifact, so it has to be compiled from source as part of the same Maven
-reactor build as the service itself. All 10 modules' `pom.xml` files get
+reactor build as the service itself. All 11 modules' `pom.xml` files get
 copied and `dependency:go-offline` run before any `src/` is copied in — the
 standard Docker/Maven layer-caching trick, so a rebuild after a source-only
 change doesn't re-download the world. This was a genuine early failure
@@ -529,7 +586,7 @@ Prometheus's `/targets`, the other harmlessly shows "down," so switching
 between `mvn spring-boot:run` and `docker compose up` never means editing
 monitoring config.
 
-Verified live end to end: built and started all 9 containers alongside the
+Verified live end to end: built and started all 10 containers alongside the
 existing infra, sent a real payment through the containerized gateway
 (`:8088`), and watched it cross every container boundary — payment-api's
 Kafka command through saga-orchestrator, fraud-service, funds-auth-service
@@ -591,9 +648,9 @@ is handled once at the gateway rather than per-controller. See
 
 ## Security
 
-Every REST endpoint across the five services that expose one — `payment-api`,
+Every REST endpoint across the six services that expose one — `payment-api`,
 `saga-orchestrator`, `ledger-service`, `notification-service`,
-`read-model-service` — requires an `X-API-Key` header, checked by a shared
+`read-model-service`, `compliance-service` — requires an `X-API-Key` header, checked by a shared
 `ApiKeyAuthFilter` in `common` that
 each service registers explicitly via its own `FilterRegistrationBean`
 (component scanning never crosses from `common` into a service's own base
@@ -616,10 +673,10 @@ locally.
 
 ## Status
 
-**Built — all 8 core services, including real compensation, plus a live dashboard:**
-`payment-api`, `saga-orchestrator`, `fraud-service`, `funds-auth-service`,
-`ledger-service`, `settlement-service`, `notification-service`,
-`read-model-service`. The full
+**Built — all 9 core services, including real compensation, plus a live dashboard:**
+`payment-api`, `saga-orchestrator`, `fraud-service`, `compliance-service`,
+`funds-auth-service`, `ledger-service`, `settlement-service`,
+`notification-service`, `read-model-service`. The full
 happy path works end to end — intake through fraud approval, funds
 authorization, ledger HOLD posting, settlement capture, a final
 double-entry ledger posting, and notifications to both parties, all the
@@ -668,7 +725,12 @@ now feeds [AI Compensation Summaries](#ai-compensation-summaries): a
 compensated payment's transition history can be turned into a plain-English
 incident note on demand via the Gemini API — LLM explains, never decides —
 circuit-breaker-guarded with a deterministic fallback so the endpoint works
-with no API key at all.
+with no API key at all. A 10th service, **compliance-service**, now gates
+every payment before fraud with a KYC check and a UPI-directory check tied
+to a new `paymentMethod` field (`CARD`/`UPI`/`NETBANKING`) threaded through
+the whole saga, plus AML-style regulatory reporting for high-value amounts
+regardless of verdict — see
+[Compliance & Payment Methods](#compliance--payment-methods).
 
 **Also on the roadmap** — the difference between a demo and something that
 reads as production-grade:
@@ -690,13 +752,17 @@ end — every phase since `fraud-service` has shipped with its own tests.
 
 - **Unit tests** (JUnit 5 + Mockito) for pure logic and mockable
   collaborators: fraud-service's `FraudRule` strategies and rule engine,
-  funds-auth-service's `MockBankLedger` and command listener (both
+  compliance-service's `KycVerificationRule`/`UpiDirectoryRule` strategies,
+  its command listener (both verdicts, idempotency, the AML-report side
+  effect firing regardless of verdict, failure propagation), and its REST
+  controller, funds-auth-service's `MockBankLedger` and command listener (both
   authorize and release paths), ledger-service's `DoubleEntryLedger` (HOLD,
   FINAL, and REVERSAL legs), settlement-service's `SettleCommandListener`
   and `SettlementRiskCheck`, notification-service's `PaymentOutcomeListener`
   (both-parties-on-success, payer-only-on-failure-or-compensation), and —
   the most important one — saga-orchestrator's `PaymentEventListener`,
-  covering every state transition including the full compensation sequence
+  covering every state transition — including the new `CHECK_COMPLIANCE`
+  step and both its verdicts — plus the full compensation sequence
   (`SETTLEMENT_DECLINED → COMPENSATING → LEDGER_REVERSED → COMPENSATING →
   FUNDS_RELEASED → COMPENSATED`, chained through one test to prove it lands
   on `COMPENSATED` rather than getting stuck), both early-failure branches,
@@ -773,6 +839,7 @@ cd ledger-service && mvn spring-boot:run       # :8085
 cd settlement-service && mvn spring-boot:run   # :8086
 cd notification-service && mvn spring-boot:run # :8087
 cd read-model-service && mvn spring-boot:run   # :8089
+cd compliance-service && mvn spring-boot:run   # :8090
 cd api-gateway && mvn spring-boot:run          # :8088
 
 # 4. (optional) Start the dashboard
@@ -786,11 +853,11 @@ requires only Docker Desktop, no local Java/Maven install:
 docker compose --profile docker up --build
 ```
 
-Builds and starts infra plus all 9 services from source. Same ports as
-Option A (`:8080`, `:8082`–`:8089`), so the dashboard and any curl testing
+Builds and starts infra plus all 10 services from source. Same ports as
+Option A (`:8080`, `:8082`–`:8090`), so the dashboard and any curl testing
 below work identically either way. `--profile docker` is required — a plain
 `docker compose up -d` (as used in Option A's step 1) intentionally starts
-infra only, so it doesn't unexpectedly try to build and start all 9 services
+infra only, so it doesn't unexpectedly try to build and start all 10 services
 too.
 
 Either way: Kafka UI is at http://localhost:8081 for browsing topics/messages
@@ -805,6 +872,7 @@ the API key to call endpoints from the page:
 - ledger-service — http://localhost:8085/swagger-ui/index.html
 - notification-service — http://localhost:8087/swagger-ui/index.html
 - read-model-service — http://localhost:8089/swagger-ui/index.html
+- compliance-service — http://localhost:8090/swagger-ui/index.html
 
 ### Try it
 
@@ -817,7 +885,7 @@ curl -i -X POST http://localhost:8088/payments \
   -H "Content-Type: application/json" \
   -H "Idempotency-Key: demo-gateway-1" \
   -H "X-API-Key: local-dev-api-key-change-me" \
-  -d '{"payerAccount":"11111111-1111-1111-1111-111111111111","payeeAccount":"22222222-2222-2222-2222-222222222222","amountCents":2500,"currency":"USD"}'
+  -d '{"payerAccount":"11111111-1111-1111-1111-111111111111","payeeAccount":"22222222-2222-2222-2222-222222222222","amountCents":2500,"currency":"USD","paymentMethod":"NETBANKING"}'
 ```
 
 ```bash
@@ -825,23 +893,67 @@ curl -i -X POST http://localhost:8080/payments \
   -H "Content-Type: application/json" \
   -H "Idempotency-Key: demo-1" \
   -H "X-API-Key: local-dev-api-key-change-me" \
-  -d '{"payerAccount":"11111111-1111-1111-1111-111111111111","payeeAccount":"22222222-2222-2222-2222-222222222222","amountCents":2500,"currency":"USD"}'
+  -d '{"payerAccount":"11111111-1111-1111-1111-111111111111","payeeAccount":"22222222-2222-2222-2222-222222222222","amountCents":2500,"currency":"USD","paymentMethod":"NETBANKING"}'
 ```
 
 A normal amount like the above reaches `SETTLED` within a couple of
-seconds. Amounts over $10,000 (`amountCents > 1000000`) get rejected by the
+seconds — passing through the new `COMPLIANCE_CHECKED` state along the way.
+Amounts over $10,000 (`amountCents > 1000000`) get rejected by the
 fraud rule instead — try it to see the saga end in `FAILED`.
 
 To see actual **compensation**, send an amount between $9,000–$10,000
-(clears fraud and funds authorization, then gets declined at settlement):
+(clears compliance, fraud, and funds authorization, then gets declined at
+settlement):
 
 ```bash
 curl -i -X POST http://localhost:8080/payments \
   -H "Content-Type: application/json" \
   -H "Idempotency-Key: demo-compensation-1" \
   -H "X-API-Key: local-dev-api-key-change-me" \
-  -d '{"payerAccount":"33333333-3333-3333-3333-333333333333","payeeAccount":"44444444-4444-4444-4444-444444444444","amountCents":950000,"currency":"USD"}'
+  -d '{"payerAccount":"33333333-3333-3333-3333-333333333333","payeeAccount":"44444444-4444-4444-4444-444444444444","amountCents":950000,"currency":"USD","paymentMethod":"NETBANKING"}'
 ```
+
+To see a **KYC rejection** (see
+[Compliance & Payment Methods](#compliance--payment-methods)), flag the
+payer account first, then attempt a payment from it:
+
+```bash
+curl -i -X POST http://localhost:8080/api/compliance/accounts/33333333-3333-3333-3333-333333333333/flag \
+  -H "X-API-Key: local-dev-api-key-change-me"
+
+curl -i -X POST http://localhost:8080/payments \
+  -H "Content-Type: application/json" \
+  -H "Idempotency-Key: demo-kyc-reject-1" \
+  -H "X-API-Key: local-dev-api-key-change-me" \
+  -d '{"payerAccount":"33333333-3333-3333-3333-333333333333","payeeAccount":"22222222-2222-2222-2222-222222222222","amountCents":2500,"currency":"USD","paymentMethod":"NETBANKING"}'
+```
+
+That ends in `FAILED` at `COMPLIANCE_REJECTED` — no `CHECK_FRAUD` is ever
+issued. Undo it with `POST /api/compliance/accounts/{id}/verify` before
+reusing that payer account in other examples.
+
+To see a **UPI rejection**, pay an account that's never been registered as a
+UPI recipient, then register it and retry:
+
+```bash
+curl -i -X POST http://localhost:8080/payments \
+  -H "Content-Type: application/json" \
+  -H "Idempotency-Key: demo-upi-reject-1" \
+  -H "X-API-Key: local-dev-api-key-change-me" \
+  -d '{"payerAccount":"11111111-1111-1111-1111-111111111111","payeeAccount":"55555555-5555-5555-5555-555555555555","amountCents":2500,"currency":"USD","paymentMethod":"UPI"}'
+
+curl -i -X POST http://localhost:8080/api/compliance/upi/55555555-5555-5555-5555-555555555555/register \
+  -H "X-API-Key: local-dev-api-key-change-me"
+
+curl -i -X POST http://localhost:8080/payments \
+  -H "Content-Type: application/json" \
+  -H "Idempotency-Key: demo-upi-retry-1" \
+  -H "X-API-Key: local-dev-api-key-change-me" \
+  -d '{"payerAccount":"11111111-1111-1111-1111-111111111111","payeeAccount":"55555555-5555-5555-5555-555555555555","amountCents":2500,"currency":"USD","paymentMethod":"UPI"}'
+```
+
+The first attempt ends in `FAILED` at `COMPLIANCE_REJECTED`; the retry
+after registering proceeds past compliance normally.
 
 That reaches `COMPENSATED` — check the ledger to see the HOLD and REVERSAL
 entries exactly offsetting (below), and the account balance restored:
@@ -895,6 +1007,15 @@ Check who got notified (both payer and payee on success; payer only on a
 ```bash
 docker exec payflow-postgres psql -U payflow -d notification \
   -c "SELECT payment_id, recipient, outcome, message FROM notifications;"
+```
+
+Check recorded AML-style regulatory reports (any payment ≥ $10,000 gets one
+regardless of its eventual verdict — the $9,500 compensation example above
+stays just under the threshold, so send a payment ≥ `amountCents: 1000000`
+to see a row here):
+
+```bash
+curl -H "X-API-Key: local-dev-api-key-change-me" http://localhost:8088/api/compliance/reports
 ```
 
 Check the [CQRS read model](#cqrs-read-model)'s own projection — should

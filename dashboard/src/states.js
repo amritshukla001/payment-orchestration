@@ -2,6 +2,7 @@
 // state means for the payer/payee, not just alphabetically.
 export const STATE_META = {
   INITIATED: { label: "Initiated", tone: "inflight" },
+  COMPLIANCE_CHECKED: { label: "Compliance Checked", tone: "inflight" },
   FRAUD_CHECKED: { label: "Fraud Checked", tone: "inflight" },
   AUTHORIZED: { label: "Authorized", tone: "inflight" },
   LEDGER_POSTED: { label: "Ledger Posted", tone: "inflight" },

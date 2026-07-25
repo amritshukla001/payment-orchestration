@@ -52,6 +52,10 @@ spring:
           uri: http://localhost:8089
           predicates:
             - Path=/api/payments/**
+        - id: compliance-service
+          uri: http://localhost:8090
+          predicates:
+            - Path=/api/compliance/**
 
 payflow:
   security:

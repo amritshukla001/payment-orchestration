@@ -7,6 +7,8 @@ package com.payflow.common.events;
  */
 public enum PaymentEventType {
     PAYMENT_INITIATED,
+    COMPLIANCE_APPROVED,
+    COMPLIANCE_REJECTED,
     FRAUD_APPROVED,
     FRAUD_REJECTED,
     FUNDS_AUTHORIZED,

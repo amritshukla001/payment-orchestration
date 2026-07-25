@@ -6,6 +6,7 @@ package com.payflow.common.enums;
  */
 public enum PaymentState {
     INITIATED,
+    COMPLIANCE_CHECKED,
     FRAUD_CHECKED,
     AUTHORIZED,
     LEDGER_POSTED,

@@ -6,6 +6,7 @@ package com.payflow.common.commands;
  * later phases (funds-auth, ledger, settlement) will implement.
  */
 public enum CommandType {
+    CHECK_COMPLIANCE,
     CHECK_FRAUD,
     AUTHORIZE_FUNDS,
     POST_LEDGER,

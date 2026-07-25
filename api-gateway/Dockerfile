@@ -5,6 +5,7 @@ COPY common/pom.xml common/pom.xml
 COPY payment-api/pom.xml payment-api/pom.xml
 COPY saga-orchestrator/pom.xml saga-orchestrator/pom.xml
 COPY fraud-service/pom.xml fraud-service/pom.xml
+COPY compliance-service/pom.xml compliance-service/pom.xml
 COPY funds-auth-service/pom.xml funds-auth-service/pom.xml
 COPY ledger-service/pom.xml ledger-service/pom.xml
 COPY settlement-service/pom.xml settlement-service/pom.xml

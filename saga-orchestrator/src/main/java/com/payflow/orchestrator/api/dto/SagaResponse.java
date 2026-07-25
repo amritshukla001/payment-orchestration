@@ -11,6 +11,7 @@ public record SagaResponse(
         UUID payeeAccount,
         long amountCents,
         String currency,
+        String paymentMethod,
         String state,
         Instant updatedAt
 ) {
@@ -21,6 +22,7 @@ public record SagaResponse(
                 saga.getPayeeAccount(),
                 saga.getAmountCents(),
                 saga.getCurrency(),
+                saga.getPaymentMethod(),
                 saga.getState().name(),
                 saga.getUpdatedAt()
         );

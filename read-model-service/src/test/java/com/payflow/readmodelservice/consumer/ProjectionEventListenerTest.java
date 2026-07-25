@@ -2,6 +2,7 @@ package com.payflow.readmodelservice.consumer;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.datatype.jsr310.JavaTimeModule;
+import com.payflow.common.enums.PaymentMethod;
 import com.payflow.common.enums.PaymentState;
 import com.payflow.common.events.EventEnvelope;
 import com.payflow.common.events.LedgerFinalizedEvent;
@@ -71,7 +72,7 @@ class ProjectionEventListenerTest {
         UUID payerAccount = UUID.randomUUID();
         UUID payeeAccount = UUID.randomUUID();
         PaymentInitiatedEvent event = new PaymentInitiatedEvent(
-                paymentId, payerAccount, payeeAccount, 5_000L, "USD", Instant.now());
+                paymentId, payerAccount, payeeAccount, 5_000L, "USD", PaymentMethod.NETBANKING, Instant.now());
 
         listener.onEvent(recordFor(paymentId, "PAYMENT_INITIATED", event), ack);
 
@@ -83,8 +84,31 @@ class ProjectionEventListenerTest {
         assertThat(saved.getPayeeAccount()).isEqualTo(payeeAccount);
         assertThat(saved.getAmountCents()).isEqualTo(5_000L);
         assertThat(saved.getCurrency()).isEqualTo("USD");
+        assertThat(saved.getPaymentMethod()).isEqualTo("NETBANKING");
         assertThat(saved.getState()).isEqualTo(PaymentState.INITIATED);
         verify(ack).acknowledge();
+    }
+
+    @Test
+    void complianceApprovedAdvancesToComplianceChecked() throws Exception {
+        UUID paymentId = UUID.randomUUID();
+        PaymentView view = existingView(paymentId, PaymentState.INITIATED);
+        when(paymentViewRepository.findById(paymentId)).thenReturn(Optional.of(view));
+
+        listener.onEvent(recordFor(paymentId, "COMPLIANCE_APPROVED", Map.of()), ack);
+
+        assertThat(view.getState()).isEqualTo(PaymentState.COMPLIANCE_CHECKED);
+    }
+
+    @Test
+    void complianceRejectionEndsInFailed() throws Exception {
+        UUID paymentId = UUID.randomUUID();
+        PaymentView view = existingView(paymentId, PaymentState.INITIATED);
+        when(paymentViewRepository.findById(paymentId)).thenReturn(Optional.of(view));
+
+        listener.onEvent(recordFor(paymentId, "COMPLIANCE_REJECTED", Map.of()), ack);
+
+        assertThat(view.getState()).isEqualTo(PaymentState.FAILED);
     }
 
     @Test
@@ -199,7 +223,8 @@ class ProjectionEventListenerTest {
     void anAlreadyProcessedEventIsSkippedEntirely() throws Exception {
         UUID paymentId = UUID.randomUUID();
         ConsumerRecord<String, String> record = recordFor(paymentId, "PAYMENT_INITIATED",
-                new PaymentInitiatedEvent(paymentId, UUID.randomUUID(), UUID.randomUUID(), 100L, "USD", Instant.now()));
+                new PaymentInitiatedEvent(paymentId, UUID.randomUUID(), UUID.randomUUID(), 100L, "USD",
+                        PaymentMethod.NETBANKING, Instant.now()));
         UUID eventId = objectMapper.readValue(record.value(), EventEnvelope.class).eventId();
         when(processedEventRepository.existsById(eventId)).thenReturn(true);
 
@@ -213,7 +238,7 @@ class ProjectionEventListenerTest {
     void aFailureDuringHandlingPropagatesInsteadOfBeingSwallowed() throws Exception {
         UUID paymentId = UUID.randomUUID();
         PaymentInitiatedEvent event = new PaymentInitiatedEvent(
-                paymentId, UUID.randomUUID(), UUID.randomUUID(), 5_000L, "USD", Instant.now());
+                paymentId, UUID.randomUUID(), UUID.randomUUID(), 5_000L, "USD", PaymentMethod.NETBANKING, Instant.now());
         when(paymentViewRepository.save(any())).thenThrow(new RuntimeException("transient DB blip"));
 
         assertThatThrownBy(() -> listener.onEvent(recordFor(paymentId, "PAYMENT_INITIATED", event), ack))
@@ -226,7 +251,7 @@ class ProjectionEventListenerTest {
     // --- helpers -------------------------------------------------------
 
     private PaymentView existingView(UUID paymentId, PaymentState state) {
-        return new PaymentView(paymentId, UUID.randomUUID(), UUID.randomUUID(), 5_000L, "USD", state, Instant.now());
+        return new PaymentView(paymentId, UUID.randomUUID(), UUID.randomUUID(), 5_000L, "USD", "NETBANKING", state, Instant.now());
     }
 
     private LedgerPostedEvent holdEvent(UUID paymentId) {

@@ -22,9 +22,9 @@ class SagaTimelineFormatterTest {
 
         List<SagaEvent> events = List.of(
                 new SagaEvent(UUID.randomUUID(), paymentId, 0, "PAYMENT_INITIATED", "INITIATED",
-                        payerAccount, payeeAccount, 950_000L, "USD", t0),
+                        payerAccount, payeeAccount, 950_000L, "USD", "NETBANKING", t0),
                 new SagaEvent(UUID.randomUUID(), paymentId, 1, "SETTLEMENT_DECLINED", "COMPENSATING",
-                        null, null, null, null, t0.plusSeconds(2))
+                        null, null, null, null, null, t0.plusSeconds(2))
         );
 
         String timeline = formatter.format(events);

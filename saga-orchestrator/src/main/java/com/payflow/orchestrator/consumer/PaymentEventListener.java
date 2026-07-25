@@ -2,6 +2,7 @@ package com.payflow.orchestrator.consumer;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.payflow.common.commands.AuthorizeFundsCommand;
+import com.payflow.common.commands.CheckComplianceCommand;
 import com.payflow.common.commands.CheckFraudCommand;
 import com.payflow.common.commands.PostFinalLedgerCommand;
 import com.payflow.common.commands.PostLedgerCommand;
@@ -9,6 +10,7 @@ import com.payflow.common.commands.ReleaseFundsCommand;
 import com.payflow.common.commands.ReverseLedgerCommand;
 import com.payflow.common.commands.SettleCommand;
 import com.payflow.common.enums.PaymentState;
+import com.payflow.common.events.ComplianceRejectedEvent;
 import com.payflow.common.events.EventEnvelope;
 import com.payflow.common.events.FraudRejectedEvent;
 import com.payflow.common.events.FundsAuthorizationFailedEvent;
@@ -92,6 +94,8 @@ public class PaymentEventListener {
 
         switch (type) {
             case PAYMENT_INITIATED -> onPaymentInitiated(envelope);
+            case COMPLIANCE_APPROVED -> onComplianceApproved(envelope);
+            case COMPLIANCE_REJECTED -> onComplianceRejected(envelope);
             case FRAUD_APPROVED -> onFraudApproved(envelope);
             case FRAUD_REJECTED -> onFraudRejected(envelope);
             case FUNDS_AUTHORIZED -> onFundsAuthorized(envelope);
@@ -110,13 +114,35 @@ public class PaymentEventListener {
         PaymentInitiatedEvent event = objectMapper.treeToValue(envelope.payload(), PaymentInitiatedEvent.class);
 
         sagaEventStore.appendInitiated(event.paymentId(), event.payerAccount(), event.payeeAccount(),
-                event.amountCents(), event.currency(), Instant.now());
+                event.amountCents(), event.currency(), event.paymentMethod().name(), Instant.now());
+
+        CheckComplianceCommand command = new CheckComplianceCommand(
+                event.paymentId(), event.payerAccount(), event.payeeAccount(), event.amountCents(),
+                event.currency(), event.paymentMethod(), Instant.now());
+        publishCommand(event.paymentId(), "CHECK_COMPLIANCE", command);
+
+        log.info("Payment {} INITIATED -> issued CHECK_COMPLIANCE", event.paymentId());
+    }
+
+    private void onComplianceApproved(EventEnvelope envelope) throws Exception {
+        UUID paymentId = envelope.aggregateId();
+        PaymentSagaAggregate aggregate = sagaEventStore.load(paymentId).orElse(null);
+        if (aggregate == null) {
+            log.warn("Received COMPLIANCE_APPROVED for unknown payment {}", paymentId);
+            return;
+        }
+
+        sagaEventStore.append(aggregate, "COMPLIANCE_APPROVED", PaymentState.COMPLIANCE_CHECKED, Instant.now());
 
         CheckFraudCommand command = new CheckFraudCommand(
-                event.paymentId(), event.payerAccount(), event.amountCents(), event.currency(), Instant.now());
-        publishCommand(event.paymentId(), "CHECK_FRAUD", command);
+                paymentId, aggregate.getPayerAccount(), aggregate.getAmountCents(), aggregate.getCurrency(), Instant.now());
+        publishCommand(paymentId, "CHECK_FRAUD", command);
+        log.info("Payment {} COMPLIANCE_CHECKED -> issued CHECK_FRAUD", paymentId);
+    }
 
-        log.info("Payment {} INITIATED -> issued CHECK_FRAUD", event.paymentId());
+    private void onComplianceRejected(EventEnvelope envelope) throws Exception {
+        ComplianceRejectedEvent event = objectMapper.treeToValue(envelope.payload(), ComplianceRejectedEvent.class);
+        failSaga(event.paymentId(), "COMPLIANCE_REJECTED", event.reason(), "compliance check rejected");
     }
 
     private void onFraudApproved(EventEnvelope envelope) throws Exception {

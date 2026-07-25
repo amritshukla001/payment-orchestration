@@ -29,6 +29,9 @@ public class PaymentView {
     @Column(nullable = false, length = 3)
     private String currency;
 
+    @Column(name = "payment_method", nullable = false, length = 16)
+    private String paymentMethod;
+
     @Enumerated(EnumType.STRING)
     @Column(nullable = false, length = 32)
     private PaymentState state;
@@ -41,12 +44,13 @@ public class PaymentView {
     }
 
     public PaymentView(UUID paymentId, UUID payerAccount, UUID payeeAccount, long amountCents,
-                        String currency, PaymentState state, Instant updatedAt) {
+                        String currency, String paymentMethod, PaymentState state, Instant updatedAt) {
         this.paymentId = paymentId;
         this.payerAccount = payerAccount;
         this.payeeAccount = payeeAccount;
         this.amountCents = amountCents;
         this.currency = currency;
+        this.paymentMethod = paymentMethod;
         this.state = state;
         this.updatedAt = updatedAt;
     }
@@ -74,6 +78,10 @@ public class PaymentView {
 
     public String getCurrency() {
         return currency;
+    }
+
+    public String getPaymentMethod() {
+        return paymentMethod;
     }
 
     public PaymentState getState() {

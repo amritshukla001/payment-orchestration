@@ -11,6 +11,7 @@ public record PaymentViewResponse(
         UUID payeeAccount,
         long amountCents,
         String currency,
+        String paymentMethod,
         String state,
         Instant updatedAt
 ) {
@@ -21,6 +22,7 @@ public record PaymentViewResponse(
                 view.getPayeeAccount(),
                 view.getAmountCents(),
                 view.getCurrency(),
+                view.getPaymentMethod(),
                 view.getState().name(),
                 view.getUpdatedAt()
         );

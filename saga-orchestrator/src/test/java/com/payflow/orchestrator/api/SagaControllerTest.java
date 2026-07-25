@@ -37,7 +37,7 @@ class SagaControllerTest {
     void listReturnsSagasMostRecentlyUpdatedFirst() throws Exception {
         PaymentSagaAggregate saga = new PaymentSagaAggregate(
                 UUID.randomUUID(), UUID.randomUUID(), UUID.randomUUID(),
-                5_000L, "USD", PaymentState.SETTLED, Instant.now());
+                5_000L, "USD", "NETBANKING", PaymentState.SETTLED, Instant.now());
         when(sagaEventStore.loadAll()).thenReturn(List.of(saga));
 
         mockMvc.perform(get("/api/sagas"))
@@ -51,7 +51,7 @@ class SagaControllerTest {
         UUID paymentId = UUID.randomUUID();
         PaymentSagaAggregate saga = new PaymentSagaAggregate(
                 paymentId, UUID.randomUUID(), UUID.randomUUID(),
-                1_000L, "USD", PaymentState.COMPENSATED, Instant.now());
+                1_000L, "USD", "NETBANKING", PaymentState.COMPENSATED, Instant.now());
         when(sagaEventStore.load(paymentId)).thenReturn(Optional.of(saga));
 
         mockMvc.perform(get("/api/sagas/{id}", paymentId))

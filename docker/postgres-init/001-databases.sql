@@ -8,3 +8,4 @@ CREATE DATABASE ledger;
 CREATE DATABASE settlement;
 CREATE DATABASE notification;
 CREATE DATABASE readmodel;
+CREATE DATABASE compliance;

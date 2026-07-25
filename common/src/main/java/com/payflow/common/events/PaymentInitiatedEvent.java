@@ -1,5 +1,7 @@
 package com.payflow.common.events;
 
+import com.payflow.common.enums.PaymentMethod;
+
 import java.time.Instant;
 import java.util.UUID;
 
@@ -13,6 +15,7 @@ public record PaymentInitiatedEvent(
         UUID payeeAccount,
         long amountCents,
         String currency,
+        PaymentMethod paymentMethod,
         Instant occurredAt
 ) {
 }

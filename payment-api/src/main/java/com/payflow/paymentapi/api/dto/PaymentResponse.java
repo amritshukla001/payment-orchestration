@@ -10,6 +10,7 @@ public record PaymentResponse(
         UUID payeeAccount,
         long amountCents,
         String currency,
+        String paymentMethod,
         String state,
         Instant createdAt,
         Instant updatedAt
@@ -21,6 +22,7 @@ public record PaymentResponse(
                 payment.getPayeeAccount(),
                 payment.getAmountCents(),
                 payment.getCurrency(),
+                payment.getPaymentMethod().name(),
                 payment.getState().name(),
                 payment.getCreatedAt(),
                 payment.getUpdatedAt()

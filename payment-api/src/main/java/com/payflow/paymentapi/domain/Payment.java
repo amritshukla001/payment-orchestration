@@ -1,5 +1,6 @@
 package com.payflow.paymentapi.domain;
 
+import com.payflow.common.enums.PaymentMethod;
 import com.payflow.common.enums.PaymentState;
 import jakarta.persistence.*;
 import java.time.Instant;
@@ -28,6 +29,10 @@ public class Payment {
     private String currency;
 
     @Enumerated(EnumType.STRING)
+    @Column(name = "payment_method", nullable = false, length = 16)
+    private PaymentMethod paymentMethod;
+
+    @Enumerated(EnumType.STRING)
     @Column(nullable = false, length = 20)
     private PaymentState state;
 
@@ -48,13 +53,14 @@ public class Payment {
     }
 
     public Payment(UUID id, String idempotencyKey, UUID payerAccount, UUID payeeAccount,
-                   long amountCents, String currency, PaymentState state, Instant now) {
+                   long amountCents, String currency, PaymentMethod paymentMethod, PaymentState state, Instant now) {
         this.id = id;
         this.idempotencyKey = idempotencyKey;
         this.payerAccount = payerAccount;
         this.payeeAccount = payeeAccount;
         this.amountCents = amountCents;
         this.currency = currency;
+        this.paymentMethod = paymentMethod;
         this.state = state;
         this.createdAt = now;
         this.updatedAt = now;
@@ -82,6 +88,10 @@ public class Payment {
 
     public String getCurrency() {
         return currency;
+    }
+
+    public PaymentMethod getPaymentMethod() {
+        return paymentMethod;
     }
 
     public PaymentState getState() {

@@ -72,6 +72,8 @@ public class ProjectionEventListener {
 
         switch (envelope.eventType()) {
             case "PAYMENT_INITIATED" -> onPaymentInitiated(envelope);
+            case "COMPLIANCE_APPROVED" -> advanceState(envelope, PaymentState.COMPLIANCE_CHECKED);
+            case "COMPLIANCE_REJECTED" -> advanceState(envelope, PaymentState.FAILED);
             case "FRAUD_APPROVED" -> advanceState(envelope, PaymentState.FRAUD_CHECKED);
             case "FRAUD_REJECTED" -> advanceState(envelope, PaymentState.FAILED);
             case "FUNDS_AUTHORIZED" -> advanceState(envelope, PaymentState.AUTHORIZED);
@@ -99,7 +101,8 @@ public class ProjectionEventListener {
         PaymentInitiatedEvent event = objectMapper.treeToValue(envelope.payload(), PaymentInitiatedEvent.class);
         paymentViewRepository.save(new PaymentView(
                 event.paymentId(), event.payerAccount(), event.payeeAccount(),
-                event.amountCents(), event.currency(), PaymentState.INITIATED, event.occurredAt()));
+                event.amountCents(), event.currency(), event.paymentMethod().name(),
+                PaymentState.INITIATED, event.occurredAt()));
     }
 
     private void advanceState(EventEnvelope envelope, PaymentState state) {

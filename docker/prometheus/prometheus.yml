@@ -37,6 +37,10 @@ scrape_configs:
     metrics_path: /actuator/prometheus
     static_configs:
       - targets: ["host.docker.internal:8089", "read-model-service:8089"]
+  - job_name: compliance-service
+    metrics_path: /actuator/prometheus
+    static_configs:
+      - targets: ["host.docker.internal:8090", "compliance-service:8090"]
   - job_name: api-gateway
     metrics_path: /actuator/prometheus
     static_configs:

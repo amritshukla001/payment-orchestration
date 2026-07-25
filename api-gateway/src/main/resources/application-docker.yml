@@ -45,6 +45,10 @@ spring:
           uri: http://read-model-service:8089
           predicates:
             - Path=/api/payments/**
+        - id: compliance-service
+          uri: http://compliance-service:8090
+          predicates:
+            - Path=/api/compliance/**
 
 management:
   zipkin:

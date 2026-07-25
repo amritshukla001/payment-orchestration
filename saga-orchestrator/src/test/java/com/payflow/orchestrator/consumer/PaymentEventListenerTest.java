@@ -4,12 +4,14 @@ import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.datatype.jsr310.JavaTimeModule;
 import com.payflow.common.commands.AuthorizeFundsCommand;
+import com.payflow.common.commands.CheckComplianceCommand;
 import com.payflow.common.commands.CheckFraudCommand;
 import com.payflow.common.commands.PostFinalLedgerCommand;
 import com.payflow.common.commands.PostLedgerCommand;
 import com.payflow.common.commands.ReleaseFundsCommand;
 import com.payflow.common.commands.ReverseLedgerCommand;
 import com.payflow.common.commands.SettleCommand;
+import com.payflow.common.enums.PaymentMethod;
 import com.payflow.common.enums.PaymentState;
 import com.payflow.common.events.*;
 import com.payflow.orchestrator.domain.PaymentSagaAggregate;
@@ -70,19 +72,19 @@ class PaymentEventListenerTest {
     }
 
     @Test
-    void paymentInitiatedAppendsTheInitialFactAndIssuesCheckFraud() throws Exception {
+    void paymentInitiatedAppendsTheInitialFactAndIssuesCheckCompliance() throws Exception {
         UUID paymentId = UUID.randomUUID();
         UUID payerAccount = UUID.randomUUID();
         UUID payeeAccount = UUID.randomUUID();
         PaymentInitiatedEvent event = new PaymentInitiatedEvent(
-                paymentId, payerAccount, payeeAccount, 5_000L, "USD", Instant.now());
+                paymentId, payerAccount, payeeAccount, 5_000L, "USD", PaymentMethod.NETBANKING, Instant.now());
 
         listener.onEvent(recordFor(paymentId, PaymentEventType.PAYMENT_INITIATED, event), ack);
 
         verify(sagaEventStore).appendInitiated(eq(paymentId), eq(payerAccount), eq(payeeAccount),
-                eq(5_000L), eq("USD"), any(Instant.class));
+                eq(5_000L), eq("USD"), eq("NETBANKING"), any(Instant.class));
 
-        CheckFraudCommand command = capturedCommand(paymentId, "CHECK_FRAUD", CheckFraudCommand.class);
+        CheckComplianceCommand command = capturedCommand(paymentId, "CHECK_COMPLIANCE", CheckComplianceCommand.class);
         assertThat(command.payerAccount()).isEqualTo(payerAccount);
         assertThat(command.amountCents()).isEqualTo(5_000L);
 
@@ -90,9 +92,40 @@ class PaymentEventListenerTest {
     }
 
     @Test
-    void fraudApprovedAppendsFraudCheckedAndIssuesAuthorizeFunds() throws Exception {
+    void complianceApprovedAppendsComplianceCheckedAndIssuesCheckFraud() throws Exception {
         UUID paymentId = UUID.randomUUID();
         PaymentSagaAggregate existing = existingAggregate(paymentId, PaymentState.INITIATED);
+        when(sagaEventStore.load(paymentId)).thenReturn(Optional.of(existing));
+
+        listener.onEvent(recordFor(paymentId, PaymentEventType.COMPLIANCE_APPROVED,
+                new ComplianceApprovedEvent(paymentId, Instant.now())), ack);
+
+        verify(sagaEventStore).append(same(existing), eq("COMPLIANCE_APPROVED"), eq(PaymentState.COMPLIANCE_CHECKED), any(Instant.class));
+
+        CheckFraudCommand command = capturedCommand(paymentId, "CHECK_FRAUD", CheckFraudCommand.class);
+        assertThat(command.payerAccount()).isEqualTo(existing.getPayerAccount());
+        assertThat(command.amountCents()).isEqualTo(existing.getAmountCents());
+    }
+
+    @Test
+    void complianceRejectedAppendsFailedAndPublishesPaymentFailed() throws Exception {
+        UUID paymentId = UUID.randomUUID();
+        PaymentSagaAggregate existing = existingAggregate(paymentId, PaymentState.INITIATED);
+        when(sagaEventStore.load(paymentId)).thenReturn(Optional.of(existing));
+
+        listener.onEvent(recordFor(paymentId, PaymentEventType.COMPLIANCE_REJECTED,
+                new ComplianceRejectedEvent(paymentId, "payer account is not KYC-verified", Instant.now())), ack);
+
+        verify(sagaEventStore).append(same(existing), eq("COMPLIANCE_REJECTED"), eq(PaymentState.FAILED), any(Instant.class));
+        PaymentFailedEvent event = capturedEvent(paymentId, "PAYMENT_FAILED", PaymentFailedEvent.class);
+        assertThat(event.payerAccount()).isEqualTo(existing.getPayerAccount());
+        assertThat(event.reason()).isEqualTo("payer account is not KYC-verified");
+    }
+
+    @Test
+    void fraudApprovedAppendsFraudCheckedAndIssuesAuthorizeFunds() throws Exception {
+        UUID paymentId = UUID.randomUUID();
+        PaymentSagaAggregate existing = existingAggregate(paymentId, PaymentState.COMPLIANCE_CHECKED);
         when(sagaEventStore.load(paymentId)).thenReturn(Optional.of(existing));
 
         listener.onEvent(recordFor(paymentId, PaymentEventType.FRAUD_APPROVED,
@@ -107,7 +140,7 @@ class PaymentEventListenerTest {
     @Test
     void fraudRejectedAppendsFailedAndPublishesPaymentFailed() throws Exception {
         UUID paymentId = UUID.randomUUID();
-        PaymentSagaAggregate existing = existingAggregate(paymentId, PaymentState.INITIATED);
+        PaymentSagaAggregate existing = existingAggregate(paymentId, PaymentState.COMPLIANCE_CHECKED);
         when(sagaEventStore.load(paymentId)).thenReturn(Optional.of(existing));
 
         listener.onEvent(recordFor(paymentId, PaymentEventType.FRAUD_REJECTED,
@@ -268,7 +301,8 @@ class PaymentEventListenerTest {
     void anAlreadyProcessedEventIsSkippedEntirely() throws Exception {
         UUID paymentId = UUID.randomUUID();
         ConsumerRecord<String, String> record = recordFor(paymentId, PaymentEventType.PAYMENT_INITIATED,
-                new PaymentInitiatedEvent(paymentId, UUID.randomUUID(), UUID.randomUUID(), 100L, "USD", Instant.now()));
+                new PaymentInitiatedEvent(paymentId, UUID.randomUUID(), UUID.randomUUID(), 100L, "USD",
+                        PaymentMethod.NETBANKING, Instant.now()));
         UUID eventId = envelopeIdOf(record);
         when(processedEventRepository.existsById(eventId)).thenReturn(true);
 
@@ -302,9 +336,9 @@ class PaymentEventListenerTest {
         // a failure propagates rather than being swallowed at the method level.
         UUID paymentId = UUID.randomUUID();
         PaymentInitiatedEvent event = new PaymentInitiatedEvent(
-                paymentId, UUID.randomUUID(), UUID.randomUUID(), 5_000L, "USD", Instant.now());
+                paymentId, UUID.randomUUID(), UUID.randomUUID(), 5_000L, "USD", PaymentMethod.NETBANKING, Instant.now());
         doThrow(new RuntimeException("transient DB blip"))
-                .when(sagaEventStore).appendInitiated(any(), any(), any(), anyLong(), any(), any());
+                .when(sagaEventStore).appendInitiated(any(), any(), any(), anyLong(), any(), any(), any());
 
         assertThatThrownBy(() -> listener.onEvent(recordFor(paymentId, PaymentEventType.PAYMENT_INITIATED, event), ack))
                 .isInstanceOf(RuntimeException.class)
@@ -316,7 +350,7 @@ class PaymentEventListenerTest {
     // --- helpers -------------------------------------------------------
 
     private PaymentSagaAggregate existingAggregate(UUID paymentId, PaymentState state) {
-        return new PaymentSagaAggregate(paymentId, UUID.randomUUID(), UUID.randomUUID(), 5_000L, "USD", state, Instant.now());
+        return new PaymentSagaAggregate(paymentId, UUID.randomUUID(), UUID.randomUUID(), 5_000L, "USD", "NETBANKING", state, Instant.now());
     }
 
     private <T> ConsumerRecord<String, String> recordFor(UUID paymentId, PaymentEventType type, T payload) throws Exception {

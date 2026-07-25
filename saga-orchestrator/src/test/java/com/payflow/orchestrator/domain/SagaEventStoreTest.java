@@ -39,7 +39,7 @@ class SagaEventStoreTest {
     void loadFoldsTheStoredEventsIntoAnAggregate() {
         UUID paymentId = UUID.randomUUID();
         SagaEvent initiated = new SagaEvent(UUID.randomUUID(), paymentId, 0, "PAYMENT_INITIATED",
-                "INITIATED", UUID.randomUUID(), UUID.randomUUID(), 5_000L, "USD", Instant.now());
+                "INITIATED", UUID.randomUUID(), UUID.randomUUID(), 5_000L, "USD", "NETBANKING", Instant.now());
         when(repository.findByPaymentIdOrderBySequenceNumberAsc(paymentId)).thenReturn(List.of(initiated));
 
         Optional<PaymentSagaAggregate> loaded = store().load(paymentId);
@@ -55,7 +55,7 @@ class SagaEventStoreTest {
         UUID payeeAccount = UUID.randomUUID();
         Instant now = Instant.now();
 
-        store().appendInitiated(paymentId, payerAccount, payeeAccount, 5_000L, "USD", now);
+        store().appendInitiated(paymentId, payerAccount, payeeAccount, 5_000L, "USD", "NETBANKING", now);
 
         ArgumentCaptor<SagaEvent> captor = ArgumentCaptor.forClass(SagaEvent.class);
         verify(repository).save(captor.capture());
@@ -68,13 +68,14 @@ class SagaEventStoreTest {
         assertThat(saved.getPayeeAccount()).isEqualTo(payeeAccount);
         assertThat(saved.getAmountCents()).isEqualTo(5_000L);
         assertThat(saved.getCurrency()).isEqualTo("USD");
+        assertThat(saved.getPaymentMethod()).isEqualTo("NETBANKING");
     }
 
     @Test
     void appendWritesTheAggregatesNextSequenceNumberWithNoPayloadFields() {
         UUID paymentId = UUID.randomUUID();
         SagaEvent initiated = new SagaEvent(UUID.randomUUID(), paymentId, 0, "PAYMENT_INITIATED",
-                "INITIATED", UUID.randomUUID(), UUID.randomUUID(), 5_000L, "USD", Instant.now());
+                "INITIATED", UUID.randomUUID(), UUID.randomUUID(), 5_000L, "USD", "NETBANKING", Instant.now());
         PaymentSagaAggregate aggregate = PaymentSagaAggregate.replay(List.of(initiated));
 
         store().append(aggregate, "FRAUD_APPROVED", PaymentState.FRAUD_CHECKED, Instant.now());
@@ -98,11 +99,11 @@ class SagaEventStoreTest {
         Instant t0 = Instant.now();
 
         SagaEvent olderInitiated = new SagaEvent(UUID.randomUUID(), older, 0, "PAYMENT_INITIATED",
-                "INITIATED", UUID.randomUUID(), UUID.randomUUID(), 1_000L, "USD", t0);
+                "INITIATED", UUID.randomUUID(), UUID.randomUUID(), 1_000L, "USD", "NETBANKING", t0);
         SagaEvent olderAdvanced = new SagaEvent(UUID.randomUUID(), older, 1, "FRAUD_APPROVED",
-                "FRAUD_CHECKED", null, null, null, null, t0.plusSeconds(1));
+                "FRAUD_CHECKED", null, null, null, null, null, t0.plusSeconds(1));
         SagaEvent newerInitiated = new SagaEvent(UUID.randomUUID(), newer, 0, "PAYMENT_INITIATED",
-                "INITIATED", UUID.randomUUID(), UUID.randomUUID(), 2_000L, "USD", t0.plusSeconds(5));
+                "INITIATED", UUID.randomUUID(), UUID.randomUUID(), 2_000L, "USD", "NETBANKING", t0.plusSeconds(5));
 
         when(repository.findAllByOrderByPaymentIdAscSequenceNumberAsc())
                 .thenReturn(List.of(olderInitiated, olderAdvanced, newerInitiated));

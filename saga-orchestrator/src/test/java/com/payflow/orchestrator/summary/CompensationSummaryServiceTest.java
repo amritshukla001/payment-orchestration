@@ -106,9 +106,9 @@ class CompensationSummaryServiceTest {
         when(sagaSummaryRepository.findById(paymentId)).thenReturn(Optional.empty());
         when(sagaEventRepository.findByPaymentIdOrderBySequenceNumberAsc(paymentId)).thenReturn(List.of(
                 new SagaEvent(UUID.randomUUID(), paymentId, 0, "PAYMENT_INITIATED", "INITIATED",
-                        UUID.randomUUID(), UUID.randomUUID(), 2_500L, "USD", Instant.now()),
+                        UUID.randomUUID(), UUID.randomUUID(), 2_500L, "USD", "NETBANKING", Instant.now()),
                 new SagaEvent(UUID.randomUUID(), paymentId, 1, "PAYMENT_SETTLED", "SETTLED",
-                        null, null, null, null, Instant.now())
+                        null, null, null, null, null, Instant.now())
         ));
 
         assertThatThrownBy(() -> service.summarize(paymentId))
@@ -140,17 +140,17 @@ class CompensationSummaryServiceTest {
         Instant t0 = Instant.now();
         return List.of(
                 new SagaEvent(UUID.randomUUID(), paymentId, 0, "PAYMENT_INITIATED", "INITIATED",
-                        UUID.randomUUID(), UUID.randomUUID(), 950_000L, "USD", t0),
+                        UUID.randomUUID(), UUID.randomUUID(), 950_000L, "USD", "NETBANKING", t0),
                 new SagaEvent(UUID.randomUUID(), paymentId, 1, "FRAUD_APPROVED", "FRAUD_CHECKED",
-                        null, null, null, null, t0.plusSeconds(1)),
+                        null, null, null, null, null, t0.plusSeconds(1)),
                 new SagaEvent(UUID.randomUUID(), paymentId, 2, "FUNDS_AUTHORIZED", "AUTHORIZED",
-                        null, null, null, null, t0.plusSeconds(2)),
+                        null, null, null, null, null, t0.plusSeconds(2)),
                 new SagaEvent(UUID.randomUUID(), paymentId, 3, "LEDGER_POSTED", "LEDGER_POSTED",
-                        null, null, null, null, t0.plusSeconds(3)),
+                        null, null, null, null, null, t0.plusSeconds(3)),
                 new SagaEvent(UUID.randomUUID(), paymentId, 4, "SETTLEMENT_DECLINED", "COMPENSATING",
-                        null, null, null, null, t0.plusSeconds(4)),
+                        null, null, null, null, null, t0.plusSeconds(4)),
                 new SagaEvent(UUID.randomUUID(), paymentId, 5, "FUNDS_RELEASED", "COMPENSATED",
-                        null, null, null, null, t0.plusSeconds(5))
+                        null, null, null, null, null, t0.plusSeconds(5))
         );
     }
 }

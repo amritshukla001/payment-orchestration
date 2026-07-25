@@ -39,6 +39,7 @@
     <module>payment-api</module>
     <module>saga-orchestrator</module>
     <module>fraud-service</module>
+    <module>compliance-service</module>
     <module>funds-auth-service</module>
     <module>ledger-service</module>
     <module>settlement-service</module>

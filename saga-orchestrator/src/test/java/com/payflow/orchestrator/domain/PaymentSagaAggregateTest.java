@@ -23,7 +23,7 @@ class PaymentSagaAggregateTest {
         UUID payeeAccount = UUID.randomUUID();
         Instant occurredAt = Instant.now();
         SagaEvent initiated = new SagaEvent(UUID.randomUUID(), paymentId, 0, "PAYMENT_INITIATED",
-                "INITIATED", payerAccount, payeeAccount, 5_000L, "USD", occurredAt);
+                "INITIATED", payerAccount, payeeAccount, 5_000L, "USD", "NETBANKING", occurredAt);
 
         PaymentSagaAggregate aggregate = PaymentSagaAggregate.replay(List.of(initiated));
 
@@ -32,6 +32,7 @@ class PaymentSagaAggregateTest {
         assertThat(aggregate.getPayeeAccount()).isEqualTo(payeeAccount);
         assertThat(aggregate.getAmountCents()).isEqualTo(5_000L);
         assertThat(aggregate.getCurrency()).isEqualTo("USD");
+        assertThat(aggregate.getPaymentMethod()).isEqualTo("NETBANKING");
         assertThat(aggregate.getState()).isEqualTo(PaymentState.INITIATED);
         assertThat(aggregate.getUpdatedAt()).isEqualTo(occurredAt);
         assertThat(aggregate.nextSequenceNumber()).isEqualTo(1);
@@ -46,15 +47,15 @@ class PaymentSagaAggregateTest {
 
         List<SagaEvent> events = List.of(
                 new SagaEvent(UUID.randomUUID(), paymentId, 0, "PAYMENT_INITIATED", "INITIATED",
-                        payerAccount, payeeAccount, 5_000L, "USD", t0),
+                        payerAccount, payeeAccount, 5_000L, "USD", "NETBANKING", t0),
                 new SagaEvent(UUID.randomUUID(), paymentId, 1, "FRAUD_APPROVED", "FRAUD_CHECKED",
-                        null, null, null, null, t0.plusSeconds(1)),
+                        null, null, null, null, null, t0.plusSeconds(1)),
                 new SagaEvent(UUID.randomUUID(), paymentId, 2, "FUNDS_AUTHORIZED", "AUTHORIZED",
-                        null, null, null, null, t0.plusSeconds(2)),
+                        null, null, null, null, null, t0.plusSeconds(2)),
                 new SagaEvent(UUID.randomUUID(), paymentId, 3, "LEDGER_POSTED", "LEDGER_POSTED",
-                        null, null, null, null, t0.plusSeconds(3)),
+                        null, null, null, null, null, t0.plusSeconds(3)),
                 new SagaEvent(UUID.randomUUID(), paymentId, 4, "PAYMENT_SETTLED", "SETTLED",
-                        null, null, null, null, t0.plusSeconds(4))
+                        null, null, null, null, null, t0.plusSeconds(4))
         );
 
         PaymentSagaAggregate aggregate = PaymentSagaAggregate.replay(events);
@@ -77,17 +78,17 @@ class PaymentSagaAggregateTest {
 
         List<SagaEvent> events = List.of(
                 new SagaEvent(UUID.randomUUID(), paymentId, 0, "PAYMENT_INITIATED", "INITIATED",
-                        UUID.randomUUID(), UUID.randomUUID(), 950_000L, "USD", t0),
+                        UUID.randomUUID(), UUID.randomUUID(), 950_000L, "USD", "NETBANKING", t0),
                 new SagaEvent(UUID.randomUUID(), paymentId, 1, "FRAUD_APPROVED", "FRAUD_CHECKED",
-                        null, null, null, null, t0.plusSeconds(1)),
+                        null, null, null, null, null, t0.plusSeconds(1)),
                 new SagaEvent(UUID.randomUUID(), paymentId, 2, "FUNDS_AUTHORIZED", "AUTHORIZED",
-                        null, null, null, null, t0.plusSeconds(2)),
+                        null, null, null, null, null, t0.plusSeconds(2)),
                 new SagaEvent(UUID.randomUUID(), paymentId, 3, "LEDGER_POSTED", "LEDGER_POSTED",
-                        null, null, null, null, t0.plusSeconds(3)),
+                        null, null, null, null, null, t0.plusSeconds(3)),
                 new SagaEvent(UUID.randomUUID(), paymentId, 4, "SETTLEMENT_DECLINED", "COMPENSATING",
-                        null, null, null, null, t0.plusSeconds(4)),
+                        null, null, null, null, null, t0.plusSeconds(4)),
                 new SagaEvent(UUID.randomUUID(), paymentId, 5, "FUNDS_RELEASED", "COMPENSATED",
-                        null, null, null, null, t0.plusSeconds(5))
+                        null, null, null, null, null, t0.plusSeconds(5))
         );
 
         PaymentSagaAggregate aggregate = PaymentSagaAggregate.replay(events);

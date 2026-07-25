@@ -53,6 +53,7 @@ public class PaymentService {
                 request.payeeAccount(),
                 request.amountCents(),
                 request.currency(),
+                request.paymentMethod(),
                 PaymentState.INITIATED,
                 now
         );
@@ -64,6 +65,7 @@ public class PaymentService {
                 request.payeeAccount(),
                 request.amountCents(),
                 request.currency(),
+                request.paymentMethod(),
                 now
         );
         outboxEventRepository.save(new OutboxEvent(

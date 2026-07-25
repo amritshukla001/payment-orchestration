@@ -115,6 +115,11 @@ export default function App() {
         width: 130,
       },
       {
+        headerName: "Method",
+        field: "paymentMethod",
+        width: 110,
+      },
+      {
         headerName: "State",
         field: "state",
         cellRenderer: (p) => <StateBadge state={p.value} />,

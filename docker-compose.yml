@@ -146,6 +146,22 @@ services:
       kafka:
         condition: service_healthy
 
+  compliance-service:
+    profiles: ["docker"]
+    build:
+      context: .
+      dockerfile: compliance-service/Dockerfile
+    container_name: payflow-compliance-service
+    ports:
+      - "8090:8090"
+    environment:
+      SPRING_PROFILES_ACTIVE: docker
+    depends_on:
+      postgres:
+        condition: service_healthy
+      kafka:
+        condition: service_healthy
+
   funds-auth-service:
     profiles: ["docker"]
     build:
