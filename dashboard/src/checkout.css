@@ -14,6 +14,12 @@
   --co-danger: #dc2626;
   --co-warning: #d97706;
 
+  /* index.css sets color-scheme: dark globally for the ops console --
+     without overriding it here, Chrome renders this page's <input>s with
+     their native dark-mode form-control chrome (a near-black fill) even
+     though every other pixel on this page is explicitly styled light. */
+  color-scheme: light;
+
   min-height: 100svh;
   display: flex;
   align-items: center;
@@ -101,6 +107,7 @@
 .checkout__amount-input input {
   border: none;
   outline: none;
+  background: transparent;
   font-size: 1.4rem;
   font-weight: 650;
   width: 100%;
@@ -160,6 +167,13 @@
   color: var(--co-accent-dark);
 }
 
+.checkout__method-note {
+  margin: 8px 2px 0;
+  font-size: 0.74rem;
+  line-height: 1.5;
+  color: var(--co-text-dim);
+}
+
 .checkout__button {
   width: 100%;
   margin-top: 22px;
@@ -217,6 +231,7 @@
   border-radius: 8px;
   padding: 6px 10px;
   font-size: 0.78rem;
+  background: #fff;
   color: var(--co-text);
 }
 

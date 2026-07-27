@@ -22,10 +22,16 @@ const PRESETS = [
   { label: "$15,000.00", cents: 1500000, note: "triggers a fraud decline" },
 ];
 
+// Each method's note describes real backend behavior, not decoration --
+// UPI is the one method compliance-service actually treats differently
+// (UpiDirectoryRule): it only clears a payee explicitly registered as a
+// UPI recipient (see the ops console's Demo controls panel). Card and
+// Net Banking have no method-specific rule today, so they're honest
+// about that rather than implying a distinction that doesn't exist.
 const METHODS = [
-  { value: "CARD", label: "Card", icon: "💳" },
-  { value: "UPI", label: "UPI", icon: "📱" },
-  { value: "NETBANKING", label: "Net Banking", icon: "🏦" },
+  { value: "CARD", label: "Card", icon: "💳", note: "No method-specific checks -- goes straight to the standard compliance and fraud gates." },
+  { value: "UPI", label: "UPI", icon: "📱", note: "Only clears if the payee is a registered UPI recipient -- see compliance-service's UPI directory rule." },
+  { value: "NETBANKING", label: "Net Banking", icon: "🏦", note: "No method-specific checks -- goes straight to the standard compliance and fraud gates." },
 ];
 
 const STEPS = [
@@ -275,6 +281,9 @@ export default function Checkout() {
                 </button>
               ))}
             </div>
+            <p className="checkout__method-note">
+              {METHODS.find((m) => m.value === method)?.note}
+            </p>
 
             <button type="submit" className="checkout__button">
               Pay {centsToDisplay(amountCents)}
