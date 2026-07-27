@@ -268,3 +268,126 @@
   color: var(--text-dim);
   line-height: 1.4;
 }
+
+/* --- control panel --- */
+
+.control-panel {
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  background: var(--surface);
+}
+
+.control-panel__toggle {
+  width: 100%;
+  text-align: left;
+  background: none;
+  border: none;
+  color: var(--text-dim);
+  font-size: 0.8rem;
+  font-weight: 600;
+  letter-spacing: 0.02em;
+  padding: 10px 16px;
+  cursor: pointer;
+}
+.control-panel__toggle:hover {
+  color: var(--text);
+}
+
+.control-panel__body {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+  gap: 20px;
+  padding: 4px 16px 18px;
+  border-top: 1px solid var(--border);
+}
+
+.control-panel__body h3 {
+  font-size: 0.78rem;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: var(--text-dim);
+  margin: 14px 0 10px;
+}
+
+.control-panel__form {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.control-panel__row {
+  display: flex;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+
+.control-panel__form label {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  font-size: 0.72rem;
+  text-transform: uppercase;
+  letter-spacing: 0.03em;
+  color: var(--text-dim);
+  flex: 1;
+  min-width: 140px;
+}
+
+.control-panel__form input,
+.control-panel__form select {
+  background: var(--surface-alt);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  color: var(--text);
+  padding: 6px 8px;
+  font-size: 0.82rem;
+}
+
+.control-panel__actions {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+
+.control-panel__button {
+  background: color-mix(in srgb, var(--accent) 14%, transparent);
+  border: 1px solid color-mix(in srgb, var(--accent) 40%, transparent);
+  border-radius: 6px;
+  color: var(--accent);
+  font-size: 0.8rem;
+  font-weight: 600;
+  padding: 6px 14px;
+  cursor: pointer;
+}
+.control-panel__button:hover {
+  background: color-mix(in srgb, var(--accent) 24%, transparent);
+}
+
+.control-panel__button--danger {
+  background: color-mix(in srgb, var(--tone-danger) 14%, transparent);
+  border-color: color-mix(in srgb, var(--tone-danger) 40%, transparent);
+  color: var(--tone-danger);
+}
+.control-panel__button--danger:hover {
+  background: color-mix(in srgb, var(--tone-danger) 24%, transparent);
+}
+
+.control-panel__hint {
+  font-size: 0.75rem;
+  color: var(--text-dim);
+}
+
+.control-panel__result {
+  font-size: 0.8rem;
+  margin: 0;
+}
+.control-panel__result--pending {
+  color: var(--text-dim);
+}
+.control-panel__result--ok {
+  color: var(--tone-success);
+}
+.control-panel__result--error {
+  color: var(--tone-danger);
+}

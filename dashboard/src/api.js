@@ -17,10 +17,50 @@ async function getJson(url) {
   return res.json();
 }
 
+async function postJson(url, body, extraHeaders = {}) {
+  const res = await fetch(url, {
+    method: "POST",
+    headers: {
+      "X-API-Key": API_KEY,
+      ...(body ? { "Content-Type": "application/json" } : {}),
+      ...extraHeaders,
+    },
+    ...(body ? { body: JSON.stringify(body) } : {}),
+  });
+  if (!res.ok) {
+    const text = await res.text().catch(() => "");
+    throw new Error(`${url} -> HTTP ${res.status}${text ? `: ${text}` : ""}`);
+  }
+  return res.status === 204 ? null : res.json();
+}
+
 // Backed by read-model-service's CQRS projection, not payment-engine's
 // own table -- one denormalized view built from payment.events.
 export function fetchPayments() {
   return getJson(`${GATEWAY_URL}/api/payments`);
+}
+
+// Kicks off a real payment through payment-api's transactional outbox --
+// the same POST /payments the curl walkthrough in the root README uses,
+// just from the dashboard instead of a terminal.
+export function createPayment(request) {
+  const idempotencyKey = crypto.randomUUID();
+  return postJson(`${GATEWAY_URL}/payments`, request, { "Idempotency-Key": idempotencyKey });
+}
+
+// The three demo levers compliance-service exposes -- API-only by design
+// (see compliance-service's ComplianceController), surfaced here so a demo
+// doesn't need a terminal open.
+export function flagAccount(accountId) {
+  return postJson(`${GATEWAY_URL}/api/compliance/accounts/${accountId}/flag`);
+}
+
+export function verifyAccount(accountId) {
+  return postJson(`${GATEWAY_URL}/api/compliance/accounts/${accountId}/verify`);
+}
+
+export function registerUpi(accountId) {
+  return postJson(`${GATEWAY_URL}/api/compliance/upi/${accountId}/register`);
 }
 
 // One call for the whole detail drawer (payment + ledger entries +

@@ -9,6 +9,7 @@ import {
 import { fetchPayments, fetchPaymentDetail } from "./api.js";
 import { stateMeta } from "./states.js";
 import PaymentDrawer from "./PaymentDrawer.jsx";
+import ControlPanel from "./ControlPanel.jsx";
 import "./App.css";
 
 ModuleRegistry.registerModules([AllCommunityModule]);
@@ -185,6 +186,8 @@ export default function App() {
           </div>
         ))}
       </div>
+
+      <ControlPanel />
 
       <div className="grid-shell">
         <div className="grid-shell__inner">

@@ -641,6 +641,13 @@ service of its own beyond the read model above: it's a thin client polling
 - `GET /api/payments/{paymentId}` — the detail drawer's ledger postings and
   notifications, in one call.
 
+A collapsible **Demo controls** panel above the grid is the one place the
+dashboard writes rather than reads: a form that fires a real
+`POST /payments`, and buttons for compliance-service's three API-only demo
+levers (flag/verify KYC, register a UPI recipient) — so a KYC or UPI
+rejection can be triggered from the UI instead of curl. See
+`dashboard/README.md` for the full endpoint list.
+
 Both go through the [API Gateway](#api-gateway) at `http://localhost:8088`
 rather than the service's own port — the frontend knows one origin, and CORS
 is handled once at the gateway rather than per-controller. See
