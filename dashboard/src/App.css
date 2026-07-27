@@ -51,6 +51,16 @@
   color: var(--text-dim);
 }
 
+.console__checkout-link {
+  font-size: 0.78rem;
+  color: var(--accent);
+  text-decoration: none;
+  font-weight: 600;
+}
+.console__checkout-link:hover {
+  text-decoration: underline;
+}
+
 .summary-strip {
   display: flex;
   gap: 20px;

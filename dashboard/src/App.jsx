@@ -175,6 +175,9 @@ export default function App() {
               ? `Updated ${lastRefreshed.toLocaleTimeString()}`
               : "Loading…"}
           </span>
+          <a className="console__checkout-link" href="/?view=checkout">
+            View customer checkout →
+          </a>
         </div>
       </header>
 

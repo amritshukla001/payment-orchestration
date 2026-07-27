@@ -1,7 +1,28 @@
 # PayFlow Ops Console
 
-A React + AG Grid dashboard over the running payment-orchestration
-services. The grid and detail drawer are read-only, polling
+This app is two separate views over the same running payment-orchestration
+services, switched by URL rather than a real router (see main.jsx):
+
+- **`/`** — the ops console below: an engineering-facing grid of every
+  payment, read-only aside from the Demo controls panel.
+- **`/?view=checkout`** — a customer-facing checkout page
+  (`Checkout.jsx`/`checkout.css`), styled deliberately differently (light,
+  quiet, Stripe/Razorpay-shaped) from the dark ops console, since it's
+  meant to be what someone actually paying would see, not what an engineer
+  watching Kafka would. Pays a fixed demo merchant account, offers three
+  amount presets that double as scenario triggers (a plain payment, a
+  $9,500 compensation demo, a $15,000 high-value decline), and polls the
+  same `GET /api/payments/{id}` the ops console's drawer uses to drive a
+  step-by-step progress view through `INITIATED → COMPLIANCE_CHECKED →
+  FRAUD_CHECKED → AUTHORIZED → LEDGER_POSTED → SETTLED`, ending on a
+  success, reversed, or failure screen. No fake card-number/CVV fields —
+  this project models accounts as opaque UUIDs throughout, and a realistic
+  card-entry form with no real card network behind it would misrepresent
+  what's actually happening. A customer id is generated once via
+  `crypto.randomUUID()` and persisted in `localStorage` so repeat visits
+  are "the same customer."
+
+The ops console — the grid and detail drawer — are read-only, polling
 `read-model-service`'s CQRS read model through the API Gateway
 (`http://localhost:8088`, see the root README's
 [API Gateway](../README.md#api-gateway) section) — a denormalized

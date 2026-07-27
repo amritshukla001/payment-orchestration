@@ -9,8 +9,11 @@ const GATEWAY_URL = "http://localhost:8088";
 // management.
 const API_KEY = import.meta.env.VITE_API_KEY ?? "local-dev-api-key-change-me";
 
-async function getJson(url) {
+async function getJson(url, { notFoundOk = false } = {}) {
   const res = await fetch(url, { headers: { "X-API-Key": API_KEY } });
+  if (notFoundOk && res.status === 404) {
+    return null;
+  }
   if (!res.ok) {
     throw new Error(`${url} -> HTTP ${res.status}`);
   }
@@ -65,9 +68,13 @@ export function registerUpi(accountId) {
 
 // One call for the whole detail drawer (payment + ledger entries +
 // notifications), where this used to be two separate calls into
-// ledger-service and notification-service.
-export function fetchPaymentDetail(paymentId) {
-  return getJson(`${GATEWAY_URL}/api/payments/${paymentId}`);
+// ledger-service and notification-service. `notFoundOk` exists for
+// pollUntilTerminal below: a payment-api 202 response comes back before
+// the outbox has even published PAYMENT_INITIATED, let alone before
+// read-model-service's projection has caught up, so the very first poll
+// or two can legitimately 404 -- that's "not projected yet", not an error.
+export function fetchPaymentDetail(paymentId, { notFoundOk = false } = {}) {
+  return getJson(`${GATEWAY_URL}/api/payments/${paymentId}`, { notFoundOk });
 }
 
 // AI-generated incident summary for a COMPENSATED payment, served by
@@ -76,4 +83,29 @@ export function fetchPaymentDetail(paymentId) {
 // Claude API is unavailable (response.source says which).
 export function fetchPaymentEngineSummary(paymentId) {
   return getJson(`${GATEWAY_URL}/api/payment-engine/${paymentId}/summary`);
+}
+
+const TERMINAL_STATES = new Set(["SETTLED", "FAILED", "COMPENSATED"]);
+
+// The checkout page's only way to know how a payment turned out -- there's
+// no websocket/SSE push in this system by design (see the root README's
+// dashboard section), so this polls the same read-model projection the
+// ops console grid does, just for one payment instead of all of them.
+// Resolves with the last poll's detail once a terminal state is reached,
+// or once maxWaitMs elapses (the saga is almost always done in well under
+// a second, so this is a generous ceiling, not a tuned SLA).
+export async function pollUntilTerminal(paymentId, { intervalMs = 500, maxWaitMs = 20000, onUpdate } = {}) {
+  const deadline = Date.now() + maxWaitMs;
+  for (;;) {
+    const detail = await fetchPaymentDetail(paymentId, { notFoundOk: true });
+    if (detail) {
+      onUpdate?.(detail);
+      if (TERMINAL_STATES.has(detail.payment.state) || Date.now() >= deadline) {
+        return detail;
+      }
+    } else if (Date.now() >= deadline) {
+      throw new Error(`${paymentId} never appeared in the read model within ${maxWaitMs}ms`);
+    }
+    await new Promise((resolve) => setTimeout(resolve, intervalMs));
+  }
 }
