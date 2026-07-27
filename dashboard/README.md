@@ -20,7 +20,11 @@ services, switched by URL rather than a real router (see main.jsx):
   card-entry form with no real card network behind it would misrepresent
   what's actually happening. A customer id is generated once via
   `crypto.randomUUID()` and persisted in `localStorage` so repeat visits
-  are "the same customer."
+  are "the same customer" by default — the **switch** link next to it
+  lets you paste in a different account (e.g. one you already flagged for
+  KYC review or registered for UPI via the ops console's Demo controls
+  panel) to see that decision from the paying customer's side instead of
+  the engineer's, or generate a brand-new one.
 
 The ops console — the grid and detail drawer — are read-only, polling
 `read-model-service`'s CQRS read model through the API Gateway

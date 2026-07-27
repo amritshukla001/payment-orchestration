@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useState } from "react";
 import { createPayment, pollUntilTerminal } from "./api.js";
 import "./checkout.css";
 
@@ -44,6 +44,66 @@ function getCustomerId() {
     localStorage.setItem(CUSTOMER_ID_KEY, id);
   }
   return id;
+}
+
+const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
+// Editable rather than fixed -- paste in an account you already flagged
+// for KYC review or registered for UPI via the ops console's Demo
+// controls panel, to see that decision from the paying customer's side
+// instead of the engineer's.
+function CustomerPicker({ customerId, onChange }) {
+  const [editing, setEditing] = useState(false);
+  const [draft, setDraft] = useState(customerId);
+
+  if (!editing) {
+    return (
+      <p className="checkout__customer">
+        Paying as customer <span className="mono">{customerId.slice(0, 8)}…</span>{" "}
+        <button type="button" className="checkout__link" onClick={() => { setDraft(customerId); setEditing(true); }}>
+          switch
+        </button>
+      </p>
+    );
+  }
+
+  const apply = () => {
+    if (UUID_RE.test(draft)) {
+      onChange(draft);
+      setEditing(false);
+    }
+  };
+
+  return (
+    <div className="checkout__customer-edit">
+      <input
+        className="mono"
+        value={draft}
+        placeholder="00000000-0000-0000-0000-000000000000"
+        onChange={(e) => setDraft(e.target.value.trim())}
+      />
+      <button
+        type="button"
+        className="checkout__link"
+        onClick={() => {
+          const fresh = crypto.randomUUID();
+          setDraft(fresh);
+          onChange(fresh);
+        }}
+      >
+        new
+      </button>
+      <button type="button" className="checkout__link" onClick={apply}>
+        use
+      </button>
+      <button type="button" className="checkout__link" onClick={() => setEditing(false)}>
+        cancel
+      </button>
+      {!UUID_RE.test(draft) && draft.length > 0 && (
+        <p className="checkout__error">Not a valid account ID (expects a UUID).</p>
+      )}
+    </div>
+  );
 }
 
 function centsToDisplay(cents) {
@@ -112,7 +172,7 @@ function Outcome({ detail, onReset }) {
 }
 
 export default function Checkout() {
-  const customerId = useMemo(getCustomerId, []);
+  const [customerId, setCustomerId] = useState(getCustomerId);
   const [amountCents, setAmountCents] = useState(2500);
   const [method, setMethod] = useState("CARD");
   const [phase, setPhase] = useState("idle"); // idle | processing | done
@@ -123,6 +183,11 @@ export default function Checkout() {
   useEffect(() => {
     document.title = "PayFlow Checkout";
   }, []);
+
+  const changeCustomer = (id) => {
+    setCustomerId(id);
+    localStorage.setItem(CUSTOMER_ID_KEY, id);
+  };
 
   const pay = async (e) => {
     e.preventDefault();
@@ -216,9 +281,7 @@ export default function Checkout() {
             </button>
             {error && <p className="checkout__error">{error}</p>}
 
-            <p className="checkout__customer">
-              Paying as customer <span className="mono">{customerId.slice(0, 8)}…</span>
-            </p>
+            <CustomerPicker customerId={customerId} onChange={changeCustomer} />
           </form>
         )}
 
