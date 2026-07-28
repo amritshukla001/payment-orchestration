@@ -64,3 +64,7 @@ resilience4j:
         failure-rate-threshold: 50
         wait-duration-in-open-state: 5s
         permitted-number-of-calls-in-half-open-state: 3
+
+payflow:
+  security:
+    api-key: ${PAYFLOW_API_KEY:local-dev-api-key-change-me}

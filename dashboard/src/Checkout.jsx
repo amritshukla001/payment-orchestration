@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { createPayment, pollUntilTerminal } from "./api.js";
+import { confirmStepUp, createPayment, declineStepUp, pollUntilTerminal } from "./api.js";
 import "./checkout.css";
 
 // The customer-facing counterpart to the ops console: what someone
@@ -22,22 +22,26 @@ const PRESETS = [
   { label: "$15,000.00", cents: 1500000, note: "triggers a fraud decline" },
 ];
 
-// Each method's note describes real backend behavior, not decoration --
-// UPI is the one method compliance-service actually treats differently
-// (UpiDirectoryRule): it only clears a payee explicitly registered as a
-// UPI recipient (see the ops console's Demo controls panel). Card and
-// Net Banking have no method-specific rule today, so they're honest
-// about that rather than implying a distinction that doesn't exist.
+// Each method's note describes real backend behavior, not decoration.
+// CARD pauses for an explicit step-up confirmation (see
+// PaymentEngineTransitions.requireStepUp / StepUpController) before funds
+// are authorized. UPI only clears a payee explicitly registered as a UPI
+// recipient (compliance-service's UpiDirectoryRule). NETBANKING resolves
+// the payer's account to one of five mock banks and fails if that bank's
+// gateway has been marked down (funds-auth-service's
+// NetBankingAvailabilityRule) -- see the ops console's Demo controls panel
+// for both the UPI-registration and bank-outage levers.
 const METHODS = [
-  { value: "CARD", label: "Card", icon: "💳", note: "No method-specific checks -- goes straight to the standard compliance and fraud gates." },
+  { value: "CARD", label: "Card", icon: "💳", note: "Pauses for a step-up confirmation (approve/decline) before funds are authorized -- mirrors a bank's 3D Secure/OTP prompt." },
   { value: "UPI", label: "UPI", icon: "📱", note: "Only clears if the payee is a registered UPI recipient -- see compliance-service's UPI directory rule." },
-  { value: "NETBANKING", label: "Net Banking", icon: "🏦", note: "No method-specific checks -- goes straight to the standard compliance and fraud gates." },
+  { value: "NETBANKING", label: "Net Banking", icon: "🏦", note: "Fails if your account's bank gateway is down for maintenance -- see funds-auth-service's bank-availability rule." },
 ];
 
 const STEPS = [
   { state: "INITIATED", label: "Payment received" },
   { state: "COMPLIANCE_CHECKED", label: "Compliance verified" },
   { state: "FRAUD_CHECKED", label: "Fraud check passed" },
+  { state: "AWAITING_STEP_UP", label: "Card verification" },
   { state: "AUTHORIZED", label: "Funds authorized" },
   { state: "LEDGER_POSTED", label: "Recorded to ledger" },
   { state: "SETTLED", label: "Payment settled" },
@@ -183,6 +187,8 @@ export default function Checkout() {
   const [method, setMethod] = useState("CARD");
   const [phase, setPhase] = useState("idle"); // idle | processing | done
   const [liveState, setLiveState] = useState("INITIATED");
+  const [paymentId, setPaymentId] = useState(null);
+  const [stepUpBusy, setStepUpBusy] = useState(false);
   const [detail, setDetail] = useState(null);
   const [error, setError] = useState(null);
 
@@ -208,6 +214,7 @@ export default function Checkout() {
         currency: "USD",
         paymentMethod: method,
       });
+      setPaymentId(payment.id);
       const final = await pollUntilTerminal(payment.id, {
         onUpdate: (d) => setLiveState(d.payment.state),
       });
@@ -219,10 +226,25 @@ export default function Checkout() {
     }
   };
 
+  // Only updates local "busy" state -- the actual outcome (moving past
+  // AWAITING_STEP_UP, or landing on FAILED) arrives through pay()'s
+  // still-running pollUntilTerminal loop, same as every other transition.
+  const respondToStepUp = (action) => async () => {
+    setStepUpBusy(true);
+    try {
+      await action(paymentId);
+    } catch (err) {
+      setError(err.message);
+    } finally {
+      setStepUpBusy(false);
+    }
+  };
+
   const reset = () => {
     setPhase("idle");
     setDetail(null);
     setError(null);
+    setPaymentId(null);
   };
 
   return (
@@ -298,6 +320,30 @@ export default function Checkout() {
           <div className="checkout__processing">
             <h2>Processing your payment…</h2>
             <Stepper currentState={liveState} />
+            {liveState === "AWAITING_STEP_UP" && (
+              <div className="checkout__stepup">
+                <p>Your bank needs you to approve this payment. In a real app this would be a push notification or an OTP prompt -- here, it's just these two buttons.</p>
+                <div className="checkout__stepup-actions">
+                  <button
+                    type="button"
+                    className="checkout__button"
+                    disabled={stepUpBusy}
+                    onClick={respondToStepUp(confirmStepUp)}
+                  >
+                    Approve in bank app
+                  </button>
+                  <button
+                    type="button"
+                    className="checkout__button checkout__button--ghost"
+                    disabled={stepUpBusy}
+                    onClick={respondToStepUp(declineStepUp)}
+                  >
+                    Decline
+                  </button>
+                </div>
+                <p className="checkout__stepup-timeout">Left unanswered, this request expires on its own after a minute.</p>
+              </div>
+            )}
           </div>
         )}
 

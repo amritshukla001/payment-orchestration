@@ -9,6 +9,7 @@ import com.payflow.common.commands.PostLedgerCommand;
 import com.payflow.common.commands.ReleaseFundsCommand;
 import com.payflow.common.commands.ReverseLedgerCommand;
 import com.payflow.common.commands.SettleCommand;
+import com.payflow.common.enums.PaymentMethod;
 import com.payflow.common.enums.PaymentState;
 import com.payflow.common.events.ComplianceRejectedEvent;
 import com.payflow.common.events.EventEnvelope;
@@ -16,19 +17,19 @@ import com.payflow.common.events.FraudRejectedEvent;
 import com.payflow.common.events.FundsAuthorizationFailedEvent;
 import com.payflow.common.events.PaymentCompensatedEvent;
 import com.payflow.common.events.PaymentEventType;
-import com.payflow.common.events.PaymentFailedEvent;
 import com.payflow.common.events.PaymentInitiatedEvent;
 import com.payflow.common.events.SettlementDeclinedEvent;
 import com.payflow.paymentengine.domain.PaymentEngineAggregate;
+import com.payflow.paymentengine.domain.PaymentEngineTransitions;
 import com.payflow.paymentengine.domain.ProcessedEvent;
 import com.payflow.paymentengine.domain.PaymentEngineEventStore;
+import com.payflow.paymentengine.kafka.PaymentEnginePublisher;
 import com.payflow.paymentengine.repository.ProcessedEventRepository;
 import io.github.resilience4j.retry.annotation.Retry;
 import org.apache.kafka.clients.consumer.ConsumerRecord;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.kafka.annotation.KafkaListener;
-import org.springframework.kafka.core.KafkaTemplate;
 import org.springframework.kafka.support.Acknowledgment;
 import org.springframework.stereotype.Component;
 import org.springframework.transaction.annotation.Transactional;
@@ -45,21 +46,22 @@ import java.util.UUID;
 public class PaymentEventListener {
 
     private static final Logger log = LoggerFactory.getLogger(PaymentEventListener.class);
-    private static final String COMMANDS_TOPIC = "payment.commands";
-    private static final String EVENTS_TOPIC = "payment.events";
 
     private final PaymentEngineEventStore paymentEngineEventStore;
+    private final PaymentEngineTransitions transitions;
+    private final PaymentEnginePublisher publisher;
     private final ProcessedEventRepository processedEventRepository;
-    private final KafkaTemplate<String, String> kafkaTemplate;
     private final ObjectMapper objectMapper;
 
     public PaymentEventListener(PaymentEngineEventStore paymentEngineEventStore,
+                                 PaymentEngineTransitions transitions,
+                                 PaymentEnginePublisher publisher,
                                  ProcessedEventRepository processedEventRepository,
-                                 KafkaTemplate<String, String> kafkaTemplate,
                                  ObjectMapper objectMapper) {
         this.paymentEngineEventStore = paymentEngineEventStore;
+        this.transitions = transitions;
+        this.publisher = publisher;
         this.processedEventRepository = processedEventRepository;
-        this.kafkaTemplate = kafkaTemplate;
         this.objectMapper = objectMapper;
     }
 
@@ -119,7 +121,7 @@ public class PaymentEventListener {
         CheckComplianceCommand command = new CheckComplianceCommand(
                 event.paymentId(), event.payerAccount(), event.payeeAccount(), event.amountCents(),
                 event.currency(), event.paymentMethod(), Instant.now());
-        publishCommand(event.paymentId(), "CHECK_COMPLIANCE", command);
+        publisher.publishCommand(event.paymentId(), "CHECK_COMPLIANCE", command);
 
         log.info("Payment {} INITIATED -> issued CHECK_COMPLIANCE", event.paymentId());
     }
@@ -136,13 +138,13 @@ public class PaymentEventListener {
 
         CheckFraudCommand command = new CheckFraudCommand(
                 paymentId, aggregate.getPayerAccount(), aggregate.getAmountCents(), aggregate.getCurrency(), Instant.now());
-        publishCommand(paymentId, "CHECK_FRAUD", command);
+        publisher.publishCommand(paymentId, "CHECK_FRAUD", command);
         log.info("Payment {} COMPLIANCE_CHECKED -> issued CHECK_FRAUD", paymentId);
     }
 
     private void onComplianceRejected(EventEnvelope envelope) throws Exception {
         ComplianceRejectedEvent event = objectMapper.treeToValue(envelope.payload(), ComplianceRejectedEvent.class);
-        failPayment(event.paymentId(), "COMPLIANCE_REJECTED", event.reason(), "compliance check rejected");
+        transitions.failPayment(event.paymentId(), "COMPLIANCE_REJECTED", event.reason(), "compliance check rejected");
     }
 
     private void onFraudApproved(EventEnvelope envelope) throws Exception {
@@ -155,15 +157,28 @@ public class PaymentEventListener {
 
         paymentEngineEventStore.append(aggregate, "FRAUD_APPROVED", PaymentState.FRAUD_CHECKED, Instant.now());
 
+        // CARD payments pause here for an explicit customer confirmation
+        // (see PaymentEngineTransitions.requireStepUp / StepUpController) --
+        // every other method authorizes funds immediately, same as before.
+        // Reloads rather than reusing `aggregate` in-place: its
+        // nextSequenceNumber() is frozen at load time, and requireStepUp
+        // needs the sequence number just past the FRAUD_APPROVED row this
+        // method appended above, not the one before it.
+        if (PaymentMethod.valueOf(aggregate.getPaymentMethod()) == PaymentMethod.CARD) {
+            transitions.requireStepUp(paymentEngineEventStore.load(paymentId).orElseThrow());
+            return;
+        }
+
         AuthorizeFundsCommand command = new AuthorizeFundsCommand(
-                paymentId, aggregate.getPayerAccount(), aggregate.getAmountCents(), aggregate.getCurrency(), Instant.now());
-        publishCommand(paymentId, "AUTHORIZE_FUNDS", command);
+                paymentId, aggregate.getPayerAccount(), aggregate.getAmountCents(), aggregate.getCurrency(),
+                PaymentMethod.valueOf(aggregate.getPaymentMethod()), Instant.now());
+        publisher.publishCommand(paymentId, "AUTHORIZE_FUNDS", command);
         log.info("Payment {} FRAUD_CHECKED -> issued AUTHORIZE_FUNDS", paymentId);
     }
 
     private void onFraudRejected(EventEnvelope envelope) throws Exception {
         FraudRejectedEvent event = objectMapper.treeToValue(envelope.payload(), FraudRejectedEvent.class);
-        failPayment(event.paymentId(), "FRAUD_REJECTED", event.reason(), "fraud rejected");
+        transitions.failPayment(event.paymentId(), "FRAUD_REJECTED", event.reason(), "fraud rejected");
     }
 
     private void onFundsAuthorized(EventEnvelope envelope) throws Exception {
@@ -179,7 +194,7 @@ public class PaymentEventListener {
         PostLedgerCommand command = new PostLedgerCommand(
                 paymentId, aggregate.getPayerAccount(), aggregate.getPayeeAccount(),
                 aggregate.getAmountCents(), aggregate.getCurrency(), Instant.now());
-        publishCommand(paymentId, "POST_LEDGER", command);
+        publisher.publishCommand(paymentId, "POST_LEDGER", command);
         log.info("Payment {} AUTHORIZED -> issued POST_LEDGER", paymentId);
     }
 
@@ -196,7 +211,7 @@ public class PaymentEventListener {
         SettleCommand command = new SettleCommand(
                 paymentId, aggregate.getPayerAccount(), aggregate.getPayeeAccount(),
                 aggregate.getAmountCents(), aggregate.getCurrency(), Instant.now());
-        publishCommand(paymentId, "SETTLE", command);
+        publisher.publishCommand(paymentId, "SETTLE", command);
         log.info("Payment {} LEDGER_POSTED -> issued SETTLE", paymentId);
     }
 
@@ -217,7 +232,7 @@ public class PaymentEventListener {
 
         PostFinalLedgerCommand command = new PostFinalLedgerCommand(
                 paymentId, aggregate.getPayeeAccount(), aggregate.getAmountCents(), Instant.now());
-        publishCommand(paymentId, "POST_FINAL_LEDGER", command);
+        publisher.publishCommand(paymentId, "POST_FINAL_LEDGER", command);
         log.info("Payment {} SETTLED -> issued POST_FINAL_LEDGER", paymentId);
     }
 
@@ -229,7 +244,7 @@ public class PaymentEventListener {
     private void onFundsAuthorizationFailed(EventEnvelope envelope) throws Exception {
         FundsAuthorizationFailedEvent event =
                 objectMapper.treeToValue(envelope.payload(), FundsAuthorizationFailedEvent.class);
-        failPayment(event.paymentId(), "FUNDS_AUTHORIZATION_FAILED", event.reason(), "funds authorization rejected");
+        transitions.failPayment(event.paymentId(), "FUNDS_AUTHORIZATION_FAILED", event.reason(), "funds authorization rejected");
     }
 
     // --- compensation path -----------------------------------------------
@@ -253,7 +268,7 @@ public class PaymentEventListener {
 
         ReverseLedgerCommand command = new ReverseLedgerCommand(
                 event.paymentId(), aggregate.getPayerAccount(), aggregate.getAmountCents(), Instant.now());
-        publishCommand(event.paymentId(), "REVERSE_LEDGER", command);
+        publisher.publishCommand(event.paymentId(), "REVERSE_LEDGER", command);
         log.info("Payment {} COMPENSATING -> issued REVERSE_LEDGER", event.paymentId());
     }
 
@@ -270,7 +285,7 @@ public class PaymentEventListener {
         // funds reservation is released too.
         ReleaseFundsCommand command = new ReleaseFundsCommand(
                 paymentId, aggregate.getPayerAccount(), aggregate.getAmountCents(), Instant.now());
-        publishCommand(paymentId, "RELEASE_FUNDS", command);
+        publisher.publishCommand(paymentId, "RELEASE_FUNDS", command);
         log.info("Payment {} ledger reversed -> issued RELEASE_FUNDS", paymentId);
     }
 
@@ -285,43 +300,7 @@ public class PaymentEventListener {
         paymentEngineEventStore.append(aggregate, "FUNDS_RELEASED", PaymentState.COMPENSATED, Instant.now());
         log.info("Payment {} COMPENSATED — compensation complete, funds returned to payer", paymentId);
 
-        publishEvent(paymentId, PaymentEventType.PAYMENT_COMPENSATED,
+        publisher.publishEvent(paymentId, PaymentEventType.PAYMENT_COMPENSATED,
                 new PaymentCompensatedEvent(paymentId, aggregate.getPayerAccount(), Instant.now()));
-    }
-
-    private void failPayment(UUID paymentId, String triggerEventType, String reason, String logLabel) throws Exception {
-        PaymentEngineAggregate aggregate = paymentEngineEventStore.load(paymentId).orElse(null);
-        if (aggregate == null) {
-            log.warn("Received a failure signal for unknown payment {}", paymentId);
-            return;
-        }
-
-        paymentEngineEventStore.append(aggregate, triggerEventType, PaymentState.FAILED, Instant.now());
-        log.info("Payment {} FAILED — {}: {}", paymentId, logLabel, reason);
-
-        publishEvent(paymentId, PaymentEventType.PAYMENT_FAILED,
-                new PaymentFailedEvent(paymentId, aggregate.getPayerAccount(), reason, Instant.now()));
-    }
-
-    private void publishCommand(UUID paymentId, String commandType, Object payload) throws Exception {
-        EventEnvelope envelope = new EventEnvelope(
-                UUID.randomUUID(),
-                paymentId,
-                commandType,
-                Instant.now(),
-                objectMapper.valueToTree(payload)
-        );
-        kafkaTemplate.send(COMMANDS_TOPIC, paymentId.toString(), objectMapper.writeValueAsString(envelope)).get();
-    }
-
-    private void publishEvent(UUID paymentId, PaymentEventType type, Object payload) throws Exception {
-        EventEnvelope envelope = new EventEnvelope(
-                UUID.randomUUID(),
-                paymentId,
-                type.name(),
-                Instant.now(),
-                objectMapper.valueToTree(payload)
-        );
-        kafkaTemplate.send(EVENTS_TOPIC, paymentId.toString(), objectMapper.writeValueAsString(envelope)).get();
     }
 }

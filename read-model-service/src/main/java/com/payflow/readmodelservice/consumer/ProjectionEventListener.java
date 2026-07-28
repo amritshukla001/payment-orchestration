@@ -76,6 +76,7 @@ public class ProjectionEventListener {
             case "COMPLIANCE_REJECTED" -> advanceState(envelope, PaymentState.FAILED);
             case "FRAUD_APPROVED" -> advanceState(envelope, PaymentState.FRAUD_CHECKED);
             case "FRAUD_REJECTED" -> advanceState(envelope, PaymentState.FAILED);
+            case "STEP_UP_REQUIRED" -> advanceState(envelope, PaymentState.AWAITING_STEP_UP);
             case "FUNDS_AUTHORIZED" -> advanceState(envelope, PaymentState.AUTHORIZED);
             case "FUNDS_AUTHORIZATION_FAILED" -> advanceState(envelope, PaymentState.FAILED);
             case "LEDGER_POSTED" -> onLedgerPosted(envelope);

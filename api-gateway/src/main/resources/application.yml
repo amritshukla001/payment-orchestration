@@ -56,6 +56,10 @@ spring:
           uri: http://localhost:8090
           predicates:
             - Path=/api/compliance/**
+        - id: funds-auth-service
+          uri: http://localhost:8084
+          predicates:
+            - Path=/api/funds-auth/**
 
 payflow:
   security:

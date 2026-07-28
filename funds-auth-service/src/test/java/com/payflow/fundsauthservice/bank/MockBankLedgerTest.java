@@ -1,10 +1,15 @@
 package com.payflow.fundsauthservice.bank;
 
+import com.payflow.common.enums.PaymentMethod;
 import com.payflow.fundsauthservice.domain.Account;
 import com.payflow.fundsauthservice.domain.FundsReservation;
 import com.payflow.fundsauthservice.domain.ReservationStatus;
 import com.payflow.fundsauthservice.repository.AccountRepository;
+import com.payflow.fundsauthservice.repository.BankOutageRepository;
 import com.payflow.fundsauthservice.repository.FundsReservationRepository;
+import com.payflow.fundsauthservice.rules.FundsRuleEngine;
+import com.payflow.fundsauthservice.rules.NetBankingAvailabilityRule;
+import com.payflow.fundsauthservice.rules.SufficientBalanceRule;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.Mock;
@@ -14,6 +19,7 @@ import org.springframework.cache.CacheManager;
 import org.springframework.data.redis.RedisConnectionFailureException;
 
 import java.time.Instant;
+import java.util.List;
 import java.util.Optional;
 import java.util.UUID;
 
@@ -36,8 +42,13 @@ class MockBankLedgerTest {
     @Mock
     private Cache cache;
 
+    @Mock
+    private BankOutageRepository bankOutageRepository;
+
     private MockBankLedger ledgerUnderTest() {
-        return new MockBankLedger(accountRepository, reservationRepository, cacheManager);
+        FundsRuleEngine fundsRuleEngine = new FundsRuleEngine(
+                List.of(new SufficientBalanceRule(), new NetBankingAvailabilityRule(bankOutageRepository)));
+        return new MockBankLedger(accountRepository, reservationRepository, cacheManager, fundsRuleEngine);
     }
 
     @Test
@@ -48,7 +59,7 @@ class MockBankLedgerTest {
         when(accountRepository.findById(accountId)).thenReturn(Optional.empty());
         when(accountRepository.save(any(Account.class))).thenAnswer(inv -> inv.getArgument(0));
 
-        MockBankLedger.Result result = ledgerUnderTest().reserve(paymentId, accountId, 5_000L);
+        MockBankLedger.Result result = ledgerUnderTest().reserve(paymentId, accountId, 5_000L, PaymentMethod.CARD);
 
         assertThat(result.authorized()).isTrue();
         verify(reservationRepository).save(any(FundsReservation.class));
@@ -62,7 +73,7 @@ class MockBankLedgerTest {
         when(reservationRepository.existsById(paymentId)).thenReturn(false);
         when(accountRepository.findById(accountId)).thenReturn(Optional.of(lowBalanceAccount));
 
-        MockBankLedger.Result result = ledgerUnderTest().reserve(paymentId, accountId, 5_000L);
+        MockBankLedger.Result result = ledgerUnderTest().reserve(paymentId, accountId, 5_000L, PaymentMethod.CARD);
 
         assertThat(result.authorized()).isFalse();
         assertThat(result.reason()).contains("Insufficient funds");
@@ -74,7 +85,7 @@ class MockBankLedgerTest {
         UUID paymentId = UUID.randomUUID();
         when(reservationRepository.existsById(paymentId)).thenReturn(true);
 
-        MockBankLedger.Result result = ledgerUnderTest().reserve(paymentId, UUID.randomUUID(), 5_000L);
+        MockBankLedger.Result result = ledgerUnderTest().reserve(paymentId, UUID.randomUUID(), 5_000L, PaymentMethod.CARD);
 
         assertThat(result.authorized()).isTrue();
         verifyNoInteractions(accountRepository);
@@ -127,7 +138,7 @@ class MockBankLedgerTest {
         when(accountRepository.save(any(Account.class))).thenAnswer(inv -> inv.getArgument(0));
         when(cacheManager.getCache("accountBalances")).thenReturn(cache);
 
-        ledgerUnderTest().reserve(paymentId, accountId, 5_000L);
+        ledgerUnderTest().reserve(paymentId, accountId, 5_000L, PaymentMethod.CARD);
 
         verify(cache).evict(accountId);
     }
@@ -159,7 +170,7 @@ class MockBankLedgerTest {
         when(cacheManager.getCache("accountBalances"))
                 .thenThrow(new RedisConnectionFailureException("redis is down"));
 
-        MockBankLedger.Result result = ledgerUnderTest().reserve(paymentId, accountId, 5_000L);
+        MockBankLedger.Result result = ledgerUnderTest().reserve(paymentId, accountId, 5_000L, PaymentMethod.CARD);
 
         assertThat(result.authorized()).isTrue();
         verify(reservationRepository).save(any(FundsReservation.class));

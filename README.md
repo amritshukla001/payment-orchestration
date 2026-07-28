@@ -247,11 +247,38 @@ on the attempted transaction, not just approved ones, so this always runs
 before the rule engine's verdict is even evaluated. `GET
 /api/compliance/reports` lists every recorded report for audit visibility.
 
-**Deliberately out of scope** (a natural follow-up, not built here): a
-genuinely asynchronous CARD step-up/2FA confirmation — a saga pause,
-external resume endpoint, and timeout handling — is a real, distinct
-pattern, but a substantially larger addition than this slice; `CARD` today
-only affects which compliance rule fires, not a new saga state.
+Beyond compliance-service's UPI check, the other two methods now have their
+own real, distinct behavior further down the saga:
+
+- **CARD — asynchronous step-up confirmation.** The follow-up flagged as
+  out of scope when this section was first written is now built: a new
+  `AWAITING_STEP_UP` state sits between `FRAUD_CHECKED` and `AUTHORIZED`.
+  `PaymentEventListener.onFraudApproved` branches on `PaymentMethod` —
+  `CARD` parks the saga there (`PaymentEngineTransitions.requireStepUp`,
+  publishing `STEP_UP_REQUIRED`) instead of issuing `AUTHORIZE_FUNDS`
+  immediately. Two new payment-engine endpoints resolve the pause:
+  `POST /api/payment-engine/{id}/step-up/confirm` (resumes, issuing
+  `AUTHORIZE_FUNDS`) and `.../step-up/decline` (fails the payment
+  immediately) — see `StepUpController`. Left untouched,
+  `StepUpTimeoutScheduler` (`@Scheduled`, every 5s, configurable via
+  `payment-engine.step-up-timeout-seconds`, default 60) fails it on its
+  own — mirroring a bank's own step-up expiry, not something a customer
+  can outlast by ignoring it. The checkout page's Approve/Decline buttons
+  are the customer-facing side of this; no fake OTP-code field, same
+  reasoning as the page's stance on not fabricating card fields.
+- **NETBANKING — bank-availability check.** funds-auth-service had no
+  method-specific logic at all before this; it's now promoted to the same
+  `Rule`/`RuleEngine`/`Verdict` Strategy triad compliance-service and
+  fraud-service already use (`FundsRule`/`FundsRuleEngine`), with two
+  rules: `SufficientBalanceRule` (the original, only check) and
+  `NetBankingAvailabilityRule` (`NETBANKING`-gated, mirrors
+  `UpiDirectoryRule`'s shape exactly). Since accounts have no real
+  bank-issuer field, `BankCodeResolver` deterministically maps each
+  account to one of five mock banks; a bank can be marked down
+  (`POST /api/funds-auth/banks/{bankCode}/outage`, cleared via
+  `.../restore`) — presence in `bank_outages` mirrors
+  `upi_registrations` exactly. A NetBanking payment from an account whose
+  resolved bank is down fails at funds authorization with that reason.
 
 ## Concepts & patterns demonstrated
 

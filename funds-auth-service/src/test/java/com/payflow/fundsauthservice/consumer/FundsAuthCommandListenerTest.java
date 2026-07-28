@@ -4,6 +4,7 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.datatype.jsr310.JavaTimeModule;
 import com.payflow.common.commands.AuthorizeFundsCommand;
 import com.payflow.common.commands.ReleaseFundsCommand;
+import com.payflow.common.enums.PaymentMethod;
 import com.payflow.common.events.EventEnvelope;
 import com.payflow.common.events.FundsAuthorizedEvent;
 import com.payflow.common.events.FundsReleasedEvent;
@@ -55,8 +56,9 @@ class FundsAuthCommandListenerTest {
     void authorizeFundsPublishesFundsAuthorizedWhenApproved() throws Exception {
         UUID paymentId = UUID.randomUUID();
         UUID payerAccount = UUID.randomUUID();
-        AuthorizeFundsCommand command = new AuthorizeFundsCommand(paymentId, payerAccount, 5_000L, "USD", Instant.now());
-        when(bankLedger.reserve(paymentId, payerAccount, 5_000L)).thenReturn(MockBankLedger.Result.authorize());
+        AuthorizeFundsCommand command = new AuthorizeFundsCommand(
+                paymentId, payerAccount, 5_000L, "USD", PaymentMethod.CARD, Instant.now());
+        when(bankLedger.reserve(paymentId, payerAccount, 5_000L, PaymentMethod.CARD)).thenReturn(MockBankLedger.Result.authorize());
 
         listener.onCommand(recordFor(paymentId, "AUTHORIZE_FUNDS", command), ack);
 
@@ -90,8 +92,10 @@ class FundsAuthCommandListenerTest {
         // See PaymentEventListenerTest's identical test for why.
         UUID paymentId = UUID.randomUUID();
         UUID payerAccount = UUID.randomUUID();
-        AuthorizeFundsCommand command = new AuthorizeFundsCommand(paymentId, payerAccount, 5_000L, "USD", Instant.now());
-        when(bankLedger.reserve(paymentId, payerAccount, 5_000L)).thenThrow(new RuntimeException("transient bank blip"));
+        AuthorizeFundsCommand command = new AuthorizeFundsCommand(
+                paymentId, payerAccount, 5_000L, "USD", PaymentMethod.CARD, Instant.now());
+        when(bankLedger.reserve(paymentId, payerAccount, 5_000L, PaymentMethod.CARD))
+                .thenThrow(new RuntimeException("transient bank blip"));
 
         assertThatThrownBy(() -> listener.onCommand(recordFor(paymentId, "AUTHORIZE_FUNDS", command), ack))
                 .isInstanceOf(RuntimeException.class)

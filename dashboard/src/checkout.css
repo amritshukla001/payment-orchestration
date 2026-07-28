@@ -325,6 +325,47 @@
   .checkout__step--active .checkout__step-dot { animation: none; }
 }
 
+.checkout__stepup {
+  margin-top: 18px;
+  padding: 14px;
+  border: 1px solid var(--co-border);
+  border-radius: 10px;
+  background: #f9fafb;
+  text-align: center;
+}
+
+.checkout__stepup p {
+  font-size: 0.82rem;
+  color: var(--co-text-dim);
+  line-height: 1.5;
+  margin: 0 0 12px;
+}
+
+.checkout__stepup-actions {
+  display: flex;
+  gap: 8px;
+}
+
+.checkout__stepup-actions .checkout__button {
+  margin-top: 0;
+}
+
+.checkout__button--ghost {
+  background: transparent;
+  color: var(--co-text-dim);
+  border: 1px solid var(--co-border);
+}
+.checkout__button--ghost:hover {
+  background: #fff;
+  color: var(--co-danger);
+  border-color: var(--co-danger);
+}
+
+.checkout__stepup p.checkout__stepup-timeout {
+  margin: 10px 0 0;
+  font-size: 0.7rem;
+}
+
 /* --- outcome --- */
 
 .checkout__outcome {

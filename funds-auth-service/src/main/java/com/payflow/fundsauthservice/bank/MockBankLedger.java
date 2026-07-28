@@ -1,9 +1,13 @@
 package com.payflow.fundsauthservice.bank;
 
+import com.payflow.common.enums.PaymentMethod;
 import com.payflow.fundsauthservice.domain.Account;
 import com.payflow.fundsauthservice.domain.FundsReservation;
 import com.payflow.fundsauthservice.repository.AccountRepository;
 import com.payflow.fundsauthservice.repository.FundsReservationRepository;
+import com.payflow.fundsauthservice.rules.FundsAuthorizationContext;
+import com.payflow.fundsauthservice.rules.FundsRuleEngine;
+import com.payflow.fundsauthservice.rules.Verdict;
 import io.github.resilience4j.circuitbreaker.annotation.CircuitBreaker;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -32,12 +36,14 @@ public class MockBankLedger {
     private final AccountRepository accountRepository;
     private final FundsReservationRepository reservationRepository;
     private final CacheManager cacheManager;
+    private final FundsRuleEngine fundsRuleEngine;
 
     public MockBankLedger(AccountRepository accountRepository, FundsReservationRepository reservationRepository,
-                           CacheManager cacheManager) {
+                           CacheManager cacheManager, FundsRuleEngine fundsRuleEngine) {
         this.accountRepository = accountRepository;
         this.reservationRepository = reservationRepository;
         this.cacheManager = cacheManager;
+        this.fundsRuleEngine = fundsRuleEngine;
     }
 
     public record Result(boolean authorized, String reason) {
@@ -49,7 +55,7 @@ public class MockBankLedger {
         }
     }
 
-    public Result reserve(UUID paymentId, UUID accountId, long amountCents) {
+    public Result reserve(UUID paymentId, UUID accountId, long amountCents, PaymentMethod method) {
         if (reservationRepository.existsById(paymentId)) {
             return Result.authorize(); // already reserved — safe to treat as success
         }
@@ -58,11 +64,14 @@ public class MockBankLedger {
                 .orElseGet(() -> accountRepository.save(
                         new Account(accountId, DEFAULT_STARTING_BALANCE_CENTS, Instant.now())));
 
-        if (!account.debit(amountCents)) {
-            return Result.deny("Insufficient funds: balance " + account.getBalanceCents()
-                    + " < requested " + amountCents);
+        String bankCode = BankCodeResolver.resolve(accountId);
+        Verdict verdict = fundsRuleEngine.evaluate(new FundsAuthorizationContext(
+                accountId, amountCents, account.getBalanceCents(), method, bankCode));
+        if (!verdict.approved()) {
+            return Result.deny(verdict.reason());
         }
 
+        account.debit(amountCents);
         accountRepository.save(account);
         reservationRepository.save(new FundsReservation(paymentId, accountId, amountCents, Instant.now()));
         evictBalanceCache(accountId);

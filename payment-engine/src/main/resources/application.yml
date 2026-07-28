@@ -50,6 +50,12 @@ resilience4j:
         wait-duration-in-open-state: 5s
         permitted-number-of-calls-in-half-open-state: 3
 
+payment-engine:
+  # How long a CARD payment can sit AWAITING_STEP_UP before
+  # StepUpTimeoutScheduler fails it -- kept short for a demo, a real
+  # issuer's step-up window is typically several minutes.
+  step-up-timeout-seconds: 60
+
 payflow:
   security:
     api-key: ${PAYFLOW_API_KEY:local-dev-api-key-change-me}

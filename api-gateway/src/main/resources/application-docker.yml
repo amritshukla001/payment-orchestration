@@ -49,6 +49,10 @@ spring:
           uri: http://compliance-service:8090
           predicates:
             - Path=/api/compliance/**
+        - id: funds-auth-service
+          uri: http://funds-auth-service:8084
+          predicates:
+            - Path=/api/funds-auth/**
 
 management:
   zipkin:

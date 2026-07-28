@@ -16,6 +16,8 @@ import com.payflow.common.enums.PaymentState;
 import com.payflow.common.events.*;
 import com.payflow.paymentengine.domain.PaymentEngineAggregate;
 import com.payflow.paymentengine.domain.PaymentEngineEventStore;
+import com.payflow.paymentengine.domain.PaymentEngineTransitions;
+import com.payflow.paymentengine.kafka.PaymentEnginePublisher;
 import com.payflow.paymentengine.repository.ProcessedEventRepository;
 import org.apache.kafka.clients.consumer.ConsumerRecord;
 import org.junit.jupiter.api.BeforeEach;
@@ -66,7 +68,14 @@ class PaymentEventListenerTest {
     @BeforeEach
     void setUp() {
         objectMapper = new ObjectMapper().registerModule(new JavaTimeModule());
-        listener = new PaymentEventListener(paymentEngineEventStore, processedEventRepository, kafkaTemplate, objectMapper);
+        // Real (not mocked) collaborators for the two extracted helpers --
+        // they're plain pass-throughs onto the same mocked
+        // paymentEngineEventStore/kafkaTemplate, so every existing
+        // assertion below (on append()/kafkaTemplate.send()) still holds
+        // unchanged; only the true I/O boundaries are mocked.
+        PaymentEnginePublisher publisher = new PaymentEnginePublisher(kafkaTemplate, objectMapper);
+        PaymentEngineTransitions transitions = new PaymentEngineTransitions(paymentEngineEventStore, publisher);
+        listener = new PaymentEventListener(paymentEngineEventStore, transitions, publisher, processedEventRepository, objectMapper);
         lenient().when(kafkaTemplate.send(anyString(), anyString(), anyString()))
                 .thenReturn(CompletableFuture.completedFuture(null));
     }
@@ -135,6 +144,21 @@ class PaymentEventListenerTest {
 
         AuthorizeFundsCommand command = capturedCommand(paymentId, "AUTHORIZE_FUNDS", AuthorizeFundsCommand.class);
         assertThat(command.payerAccount()).isEqualTo(existing.getPayerAccount());
+    }
+
+    @Test
+    void fraudApprovedForCardPausesAtAwaitingStepUpInsteadOfAuthorizingFunds() throws Exception {
+        UUID paymentId = UUID.randomUUID();
+        PaymentEngineAggregate existing = existingAggregate(paymentId, PaymentState.COMPLIANCE_CHECKED, "CARD");
+        when(paymentEngineEventStore.load(paymentId)).thenReturn(Optional.of(existing));
+
+        listener.onEvent(recordFor(paymentId, PaymentEventType.FRAUD_APPROVED,
+                new FraudApprovedEvent(paymentId, Instant.now())), ack);
+
+        verify(paymentEngineEventStore).append(same(existing), eq("FRAUD_APPROVED"), eq(PaymentState.FRAUD_CHECKED), any(Instant.class));
+        verify(paymentEngineEventStore).append(same(existing), eq("STEP_UP_REQUIRED"), eq(PaymentState.AWAITING_STEP_UP), any(Instant.class));
+        capturedEvent(paymentId, "STEP_UP_REQUIRED", StepUpRequiredEvent.class);
+        verify(kafkaTemplate, never()).send(eq("payment.commands"), anyString(), anyString());
     }
 
     @Test
@@ -350,7 +374,11 @@ class PaymentEventListenerTest {
     // --- helpers -------------------------------------------------------
 
     private PaymentEngineAggregate existingAggregate(UUID paymentId, PaymentState state) {
-        return new PaymentEngineAggregate(paymentId, UUID.randomUUID(), UUID.randomUUID(), 5_000L, "USD", "NETBANKING", state, Instant.now());
+        return existingAggregate(paymentId, state, "NETBANKING");
+    }
+
+    private PaymentEngineAggregate existingAggregate(UUID paymentId, PaymentState state, String paymentMethod) {
+        return new PaymentEngineAggregate(paymentId, UUID.randomUUID(), UUID.randomUUID(), 5_000L, "USD", paymentMethod, state, Instant.now());
     }
 
     private <T> ConsumerRecord<String, String> recordFor(UUID paymentId, PaymentEventType type, T payload) throws Exception {

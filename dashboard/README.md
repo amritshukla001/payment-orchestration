@@ -14,8 +14,15 @@ services, switched by URL rather than a real router (see main.jsx):
   $9,500 compensation demo, a $15,000 high-value decline), and polls the
   same `GET /api/payments/{id}` the ops console's drawer uses to drive a
   step-by-step progress view through `INITIATED → COMPLIANCE_CHECKED →
-  FRAUD_CHECKED → AUTHORIZED → LEDGER_POSTED → SETTLED`, ending on a
-  success, reversed, or failure screen. No fake card-number/CVV fields —
+  FRAUD_CHECKED → AWAITING_STEP_UP → AUTHORIZED → LEDGER_POSTED →
+  SETTLED`, ending on a success, reversed, or failure screen. A `CARD`
+  payment actually pauses at `AWAITING_STEP_UP` — the page shows an
+  Approve/Decline panel wired to payment-engine's step-up endpoints (see
+  the root README's
+  [Compliance & Payment Methods](../README.md#compliance--payment-methods)
+  section); every other method's saga skips straight past that step, same
+  as the stepper always has for states a payment doesn't visit. No fake
+  card-number/CVV fields —
   this project models accounts as opaque UUIDs throughout, and a realistic
   card-entry form with no real card network behind it would misrepresent
   what's actually happening. A customer id is generated once via
@@ -40,10 +47,14 @@ touches is read-only:
 | `GET /api/payments` | read-model-service | the live grid of payments and their current state |
 | `GET /api/payments/{paymentId}` | read-model-service | the detail drawer's ledger postings and notifications, in one call |
 | `GET /api/payment-engine/{id}/summary` | payment-engine | the compensated-payment "Generate summary" button in the drawer |
+| `POST /api/payment-engine/{id}/step-up/confirm` | payment-engine | Checkout page → **Approve in bank app** (CARD payments only) |
+| `POST /api/payment-engine/{id}/step-up/decline` | payment-engine | Checkout page → **Decline** (CARD payments only) |
 | `POST /payments` | payment-api | Demo controls → **Send a payment** |
 | `POST /api/compliance/accounts/{id}/flag` | compliance-service | Demo controls → **Flag for KYC review** |
 | `POST /api/compliance/accounts/{id}/verify` | compliance-service | Demo controls → **Verify** |
 | `POST /api/compliance/upi/{id}/register` | compliance-service | Demo controls → **Register as UPI recipient** |
+| `POST /api/funds-auth/banks/{bankCode}/outage` | funds-auth-service | Demo controls → **Mark down for maintenance** |
+| `POST /api/funds-auth/banks/{bankCode}/restore` | funds-auth-service | Demo controls → **Restore** |
 
 Before the CQRS read model existed, the grid polled `payment-engine`
 directly and the detail drawer made two further calls into `ledger-service`
@@ -55,7 +66,7 @@ those services' own transactional stores.
 ## Demo controls
 
 A collapsible panel above the grid (`ControlPanel.jsx`) so a demo doesn't
-need a terminal open. Two sections:
+need a terminal open. Three sections:
 
 - **Send a payment** — a real `POST /payments` through the same
   transactional-outbox path the curl walkthrough in the root README uses,
@@ -70,6 +81,13 @@ need a terminal open. Two sections:
   section): flag an account for KYC review, verify it again, or register it
   as a UPI recipient. Lets you trigger a KYC rejection or a UPI-directory
   rejection from the UI instead of curl.
+- **Bank outages** — funds-auth-service's demo lever for
+  `NetBankingAvailabilityRule`: mark one of the five mock banks
+  (`BankCodeResolver`) down for maintenance, or restore it. A NetBanking
+  payment from an account that resolves to a down bank fails at funds
+  authorization; every account's resolved bank is deterministic, so
+  toggling the same bank twice in a row demonstrates both outcomes on the
+  same account.
 
 Both forms report success/error inline rather than via a toast — see
 `ControlPanel.jsx`'s `ResultLine` component.

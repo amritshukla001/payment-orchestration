@@ -66,6 +66,26 @@ export function registerUpi(accountId) {
   return postJson(`${GATEWAY_URL}/api/compliance/upi/${accountId}/register`);
 }
 
+// The customer-facing resolution of a CARD payment's step-up pause --
+// see payment-engine's StepUpController and Checkout.jsx's AWAITING_STEP_UP handling.
+export function confirmStepUp(paymentId) {
+  return postJson(`${GATEWAY_URL}/api/payment-engine/${paymentId}/step-up/confirm`);
+}
+
+export function declineStepUp(paymentId) {
+  return postJson(`${GATEWAY_URL}/api/payment-engine/${paymentId}/step-up/decline`);
+}
+
+// The demo lever for funds-auth-service's NetBankingAvailabilityRule --
+// mirrors registerUpi's role for UpiDirectoryRule.
+export function markBankOutage(bankCode) {
+  return postJson(`${GATEWAY_URL}/api/funds-auth/banks/${bankCode}/outage`);
+}
+
+export function restoreBank(bankCode) {
+  return postJson(`${GATEWAY_URL}/api/funds-auth/banks/${bankCode}/restore`);
+}
+
 // One call for the whole detail drawer (payment + ledger entries +
 // notifications), where this used to be two separate calls into
 // ledger-service and notification-service. `notFoundOk` exists for

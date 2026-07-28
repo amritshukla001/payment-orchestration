@@ -70,7 +70,8 @@ public class FundsAuthCommandListener {
         }
 
         AuthorizeFundsCommand command = objectMapper.treeToValue(envelope.payload(), AuthorizeFundsCommand.class);
-        MockBankLedger.Result result = bankLedger.reserve(command.paymentId(), command.payerAccount(), command.amountCents());
+        MockBankLedger.Result result = bankLedger.reserve(
+                command.paymentId(), command.payerAccount(), command.amountCents(), command.paymentMethod());
 
         if (result.authorized()) {
             publish(command.paymentId(), PaymentEventType.FUNDS_AUTHORIZED,

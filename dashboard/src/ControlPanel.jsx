@@ -1,5 +1,9 @@
 import { useState } from "react";
-import { createPayment, flagAccount, verifyAccount, registerUpi } from "./api.js";
+import { createPayment, flagAccount, verifyAccount, registerUpi, markBankOutage, restoreBank } from "./api.js";
+
+// Mirrors funds-auth-service's BankCodeResolver.BANKS exactly -- kept in
+// sync by hand since the dashboard has no way to ask the backend for it.
+const MOCK_BANKS = ["HDFC", "SBI", "ICICI", "AXIS", "KOTAK"];
 
 // The dashboard's one write path -- everything else in this app only reads
 // from read-model-service. A collapsible panel above the grid so a demo
@@ -130,6 +134,46 @@ function ComplianceActions() {
   );
 }
 
+function BankActions() {
+  const [bankCode, setBankCode] = useState(MOCK_BANKS[0]);
+  const [result, setResult] = useState(null);
+
+  const run = (action, label) => async () => {
+    setResult({ status: "loading" });
+    try {
+      await action(bankCode);
+      setResult({ status: "ok", message: `${label} — ${bankCode}` });
+    } catch (err) {
+      setResult({ status: "error", message: err.message });
+    }
+  };
+
+  return (
+    <div className="control-panel__form">
+      <label>
+        Bank
+        <select value={bankCode} onChange={(e) => setBankCode(e.target.value)}>
+          {MOCK_BANKS.map((b) => (
+            <option key={b} value={b}>{b}</option>
+          ))}
+        </select>
+      </label>
+      <div className="control-panel__actions">
+        <button className="control-panel__button control-panel__button--danger" onClick={run(markBankOutage, "Marked down")}>
+          Mark down for maintenance
+        </button>
+        <button className="control-panel__button" onClick={run(restoreBank, "Restored")}>
+          Restore
+        </button>
+      </div>
+      <p className="control-panel__hint">
+        NetBanking payments from accounts that resolve to this bank will fail until it's restored.
+      </p>
+      <ResultLine result={result} />
+    </div>
+  );
+}
+
 export default function ControlPanel() {
   const [open, setOpen] = useState(false);
 
@@ -147,6 +191,10 @@ export default function ControlPanel() {
           <section>
             <h3>Compliance actions</h3>
             <ComplianceActions />
+          </section>
+          <section>
+            <h3>Bank outages</h3>
+            <BankActions />
           </section>
         </div>
       )}
