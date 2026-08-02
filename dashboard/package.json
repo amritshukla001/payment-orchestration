@@ -10,6 +10,8 @@
     "preview": "vite preview"
   },
   "dependencies": {
+    "@stripe/react-stripe-js": "^6.8.0",
+    "@stripe/stripe-js": "^9.12.1",
     "ag-grid-community": "^36.0.1",
     "ag-grid-react": "^36.0.1",
     "react": "^19.2.7",

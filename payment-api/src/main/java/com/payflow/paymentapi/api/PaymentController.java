@@ -69,4 +69,9 @@ public class PaymentController {
     public ResponseEntity<String> handleNotFound(com.payflow.paymentapi.service.PaymentNotFoundException e) {
         return ResponseEntity.status(HttpStatus.NOT_FOUND).body(e.getMessage());
     }
+
+    @ExceptionHandler(com.payflow.paymentapi.service.InvalidCardTokenException.class)
+    public ResponseEntity<String> handleInvalidCardToken(com.payflow.paymentapi.service.InvalidCardTokenException e) {
+        return ResponseEntity.status(HttpStatus.BAD_REQUEST).body(e.getMessage());
+    }
 }

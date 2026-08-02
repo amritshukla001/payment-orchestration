@@ -40,3 +40,23 @@ management:
 payflow:
   security:
     api-key: ${PAYFLOW_API_KEY:local-dev-api-key-change-me}
+  stripe:
+    # Empty default is a normal local-dev state: CARD payments then skip
+    # real tokenization verification instead of failing. Get a free test
+    # secret key (sk_test_...) from https://dashboard.stripe.com/test/apikeys --
+    # no billing required, no real card data or money involved in test mode.
+    api-key: ${STRIPE_API_KEY:}
+
+resilience4j:
+  circuitbreaker:
+    instances:
+      stripe-verifier:
+        sliding-window-size: 10
+        failure-rate-threshold: 50
+        wait-duration-in-open-state: 5s
+        permitted-number-of-calls-in-half-open-state: 3
+        # A rejected card is a client error, not a Stripe outage -- it
+        # shouldn't count toward the circuit breaker's failure rate or get
+        # routed through the fail-open fallback.
+        ignore-exceptions:
+          - com.payflow.paymentapi.service.InvalidCardTokenException

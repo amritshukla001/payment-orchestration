@@ -250,22 +250,44 @@ before the rule engine's verdict is even evaluated. `GET
 Beyond compliance-service's UPI check, the other two methods now have their
 own real, distinct behavior further down the saga:
 
-- **CARD — asynchronous step-up confirmation.** The follow-up flagged as
-  out of scope when this section was first written is now built: a new
-  `AWAITING_STEP_UP` state sits between `FRAUD_CHECKED` and `AUTHORIZED`.
-  `PaymentEventListener.onFraudApproved` branches on `PaymentMethod` —
-  `CARD` parks the saga there (`PaymentEngineTransitions.requireStepUp`,
-  publishing `STEP_UP_REQUIRED`) instead of issuing `AUTHORIZE_FUNDS`
-  immediately. Two new payment-engine endpoints resolve the pause:
-  `POST /api/payment-engine/{id}/step-up/confirm` (resumes, issuing
-  `AUTHORIZE_FUNDS`) and `.../step-up/decline` (fails the payment
-  immediately) — see `StepUpController`. Left untouched,
-  `StepUpTimeoutScheduler` (`@Scheduled`, every 5s, configurable via
-  `payment-engine.step-up-timeout-seconds`, default 60) fails it on its
-  own — mirroring a bank's own step-up expiry, not something a customer
-  can outlast by ignoring it. The checkout page's Approve/Decline buttons
-  are the customer-facing side of this; no fake OTP-code field, same
-  reasoning as the page's stance on not fabricating card fields.
+- **CARD — Stripe test-mode tokenization, then asynchronous step-up
+  confirmation.** Two independent layers, in order:
+  1. **Card capture.** The checkout page tokenizes the card client-side via
+     [Stripe Elements](https://stripe.com/docs/payments/elements) when a
+     publishable key is configured — real card entry, real Stripe
+     test-mode validation, but raw card data never reaches this project's
+     own backend. `payment-api`'s `StripeCardTokenVerifier` confirms the
+     resulting PaymentMethod ID with Stripe (`GET /v1/payment_methods/{id}`)
+     before the payment is allowed to enter the saga at all — a rejected
+     or missing token never gets a DB row or an outbox event. Mirrors
+     payment-engine's optional-Gemini-key pattern exactly: no
+     `STRIPE_API_KEY` configured is a normal local-dev/CI state, not an
+     error — verification is skipped and CARD behaves exactly as it did
+     before this was added. A Stripe outage fails *open* (logs a warning,
+     lets the payment proceed unverified) rather than blocking the demo —
+     a deliberate choice, not the production-grade default. **Scope
+     boundary:** Stripe verifies the card is real; it does not move money
+     — that's still the fully simulated saga below. The verified
+     PaymentMethod ID is stored on the `payments` row purely as an audit
+     trail, never read by the saga itself.
+  2. **Step-up confirmation.** The follow-up flagged as out of scope when
+     this section was first written is now built: a new
+     `AWAITING_STEP_UP` state sits between `FRAUD_CHECKED` and
+     `AUTHORIZED`. `PaymentEventListener.onFraudApproved` branches on
+     `PaymentMethod` — `CARD` parks the saga there
+     (`PaymentEngineTransitions.requireStepUp`, publishing
+     `STEP_UP_REQUIRED`) instead of issuing `AUTHORIZE_FUNDS` immediately.
+     Two new payment-engine endpoints resolve the pause:
+     `POST /api/payment-engine/{id}/step-up/confirm` (resumes, issuing
+     `AUTHORIZE_FUNDS`) and `.../step-up/decline` (fails the payment
+     immediately) — see `StepUpController`. Left untouched,
+     `StepUpTimeoutScheduler` (`@Scheduled`, every 5s, configurable via
+     `payment-engine.step-up-timeout-seconds`, default 60) fails it on
+     its own — mirroring a bank's own step-up expiry, not something a
+     customer can outlast by ignoring it. The checkout page's
+     Approve/Decline buttons are the customer-facing side of this; no
+     fake OTP-code field, same reasoning as the page's stance on not
+     fabricating card fields beyond the real Stripe ones.
 - **NETBANKING — bank-availability check.** funds-auth-service had no
   method-specific logic at all before this; it's now promoted to the same
   `Rule`/`RuleEngine`/`Verdict` Strategy triad compliance-service and

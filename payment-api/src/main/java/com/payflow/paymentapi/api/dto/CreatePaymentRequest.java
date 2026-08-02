@@ -13,6 +13,10 @@ public record CreatePaymentRequest(
         @Schema(description = "Amount in minor units, e.g. cents", example = "2500") @Positive long amountCents,
         @Schema(description = "ISO 4217 currency code", example = "USD") @NotNull @Size(min = 3, max = 3) String currency,
         @Schema(description = "How the payer is funding this payment -- affects which compliance checks apply")
-        @NotNull PaymentMethod paymentMethod
+        @NotNull PaymentMethod paymentMethod,
+        @Schema(description = "Stripe PaymentMethod ID from client-side tokenization (Stripe Elements). "
+                + "Only meaningful for CARD payments, and only required when Stripe verification is "
+                + "enabled server-side -- see StripeCardTokenVerifier.", example = "pm_1AbCdEfGhIjKlMnOpQrStUv")
+        String cardToken
 ) {
 }

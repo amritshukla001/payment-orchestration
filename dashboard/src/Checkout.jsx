@@ -1,13 +1,23 @@
 import { useEffect, useState } from "react";
+import { loadStripe } from "@stripe/stripe-js";
+import { CardElement, Elements, useElements, useStripe } from "@stripe/react-stripe-js";
 import { confirmStepUp, createPayment, declineStepUp, pollUntilTerminal } from "./api.js";
 import "./checkout.css";
 
 // The customer-facing counterpart to the ops console: what someone
 // actually paying would see, not what an engineer watching Kafka would.
-// Deliberately no fake card-number/CVV fields -- this project models
-// accounts as opaque UUIDs throughout (see the root README), and building
-// a realistic-looking card entry form for a demo with no real card network
-// behind it would be dishonest about what's actually happening.
+//
+// CARD payments are tokenized client-side via Stripe Elements when a
+// publishable key is configured -- real card entry, real Stripe test-mode
+// validation, but raw card data never reaches this app's own backend (see
+// payment-api's StripeCardTokenVerifier). Without a key configured (the
+// default for local dev/CI without a Stripe account), CARD falls back to
+// exactly what this page has always done: no card fields at all, since a
+// fake-looking card form with nothing real behind it would be dishonest
+// about what's actually happening -- this project models accounts as
+// opaque UUIDs throughout (see the root README).
+const STRIPE_PUBLISHABLE_KEY = import.meta.env.VITE_STRIPE_PUBLISHABLE_KEY;
+const stripePromise = STRIPE_PUBLISHABLE_KEY ? loadStripe(STRIPE_PUBLISHABLE_KEY) : null;
 
 // Reuses the same demo payee the root README's "Try it" walkthrough uses,
 // so a payment made here shows up with a recognizable account if you go
@@ -23,16 +33,24 @@ const PRESETS = [
 ];
 
 // Each method's note describes real backend behavior, not decoration.
-// CARD pauses for an explicit step-up confirmation (see
-// PaymentEngineTransitions.requireStepUp / StepUpController) before funds
-// are authorized. UPI only clears a payee explicitly registered as a UPI
-// recipient (compliance-service's UpiDirectoryRule). NETBANKING resolves
-// the payer's account to one of five mock banks and fails if that bank's
-// gateway has been marked down (funds-auth-service's
-// NetBankingAvailabilityRule) -- see the ops console's Demo controls panel
-// for both the UPI-registration and bank-outage levers.
+// CARD is tokenized via Stripe (when configured) and always pauses for an
+// explicit step-up confirmation (see PaymentEngineTransitions.requireStepUp
+// / StepUpController) before funds are authorized. UPI only clears a payee
+// explicitly registered as a UPI recipient (compliance-service's
+// UpiDirectoryRule). NETBANKING resolves the payer's account to one of
+// five mock banks and fails if that bank's gateway has been marked down
+// (funds-auth-service's NetBankingAvailabilityRule) -- see the ops
+// console's Demo controls panel for both the UPI-registration and
+// bank-outage levers. CARD's note is computed once from stripePromise
+// (static for the page's lifetime, since it only depends on an env var)
+// rather than living in this array, so it can't overclaim tokenization
+// that isn't actually happening when no Stripe key is configured.
+const CARD_NOTE = stripePromise
+  ? "Tokenized via Stripe (test mode) before authorization -- your card number never reaches our servers. Also pauses for a step-up confirmation, same as any card payment."
+  : "No Stripe key configured in this environment, so card details aren't collected -- still pauses for a step-up confirmation before funds are authorized.";
+
 const METHODS = [
-  { value: "CARD", label: "Card", icon: "💳", note: "Pauses for a step-up confirmation (approve/decline) before funds are authorized -- mirrors a bank's 3D Secure/OTP prompt." },
+  { value: "CARD", label: "Card", icon: "💳", note: CARD_NOTE },
   { value: "UPI", label: "UPI", icon: "📱", note: "Only clears if the payee is a registered UPI recipient -- see compliance-service's UPI directory rule." },
   { value: "NETBANKING", label: "Net Banking", icon: "🏦", note: "Fails if your account's bank gateway is down for maintenance -- see funds-auth-service's bank-availability rule." },
 ];
@@ -182,6 +200,16 @@ function Outcome({ detail, onReset }) {
 }
 
 export default function Checkout() {
+  return (
+    <Elements stripe={stripePromise}>
+      <CheckoutForm />
+    </Elements>
+  );
+}
+
+function CheckoutForm() {
+  const stripe = useStripe();
+  const elements = useElements();
   const [customerId, setCustomerId] = useState(getCustomerId);
   const [amountCents, setAmountCents] = useState(2500);
   const [method, setMethod] = useState("CARD");
@@ -204,6 +232,23 @@ export default function Checkout() {
   const pay = async (e) => {
     e.preventDefault();
     setError(null);
+
+    // Tokenize before flipping to the "processing" phase -- a declined or
+    // incomplete card should look like a form error, not a failed payment
+    // (no payment has been created yet at this point).
+    let cardToken;
+    if (method === "CARD" && stripePromise && stripe && elements) {
+      const { error: stripeError, paymentMethod: stripePaymentMethod } = await stripe.createPaymentMethod({
+        type: "card",
+        card: elements.getElement(CardElement),
+      });
+      if (stripeError) {
+        setError(stripeError.message);
+        return;
+      }
+      cardToken = stripePaymentMethod.id;
+    }
+
     setPhase("processing");
     setLiveState("INITIATED");
     try {
@@ -213,6 +258,7 @@ export default function Checkout() {
         amountCents,
         currency: "USD",
         paymentMethod: method,
+        ...(cardToken ? { cardToken } : {}),
       });
       setPaymentId(payment.id);
       const final = await pollUntilTerminal(payment.id, {
@@ -306,6 +352,22 @@ export default function Checkout() {
             <p className="checkout__method-note">
               {METHODS.find((m) => m.value === method)?.note}
             </p>
+            {method === "CARD" && stripePromise && (
+              <div className="checkout__card-element">
+                <CardElement
+                  options={{
+                    style: {
+                      base: {
+                        fontSize: "16px",
+                        color: "#101828",
+                        fontFamily: "inherit",
+                        "::placeholder": { color: "#98a2b3" },
+                      },
+                    },
+                  }}
+                />
+              </div>
+            )}
 
             <button type="submit" className="checkout__button">
               Pay {centsToDisplay(amountCents)}

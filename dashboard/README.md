@@ -127,3 +127,21 @@ VITE_API_KEY=your-key npm run dev
 A key shipped in frontend JS is never a real secret — this demonstrates the
 auth boundary between the dashboard and the services, not a credential
 management system.
+
+## Stripe (CARD payments)
+
+Checkout's CARD option renders a real Stripe Elements card field when
+`VITE_STRIPE_PUBLISHABLE_KEY` is set at build/dev time:
+
+```bash
+VITE_STRIPE_PUBLISHABLE_KEY=pk_test_... npm run dev
+```
+
+A publishable key is client-safe by design (Stripe's own terminology for
+"not a secret") — same category as `VITE_API_KEY` above. Without it set,
+CARD falls back to exactly what it's always done: no card field at all.
+The matching backend secret key (`STRIPE_API_KEY`, `sk_test_...`) goes on
+`payment-api`, not here — see the root README's
+[Compliance & Payment Methods](../README.md#compliance--payment-methods)
+section. Both are free Stripe **test-mode** keys — no billing required,
+no real card data or money ever involved.

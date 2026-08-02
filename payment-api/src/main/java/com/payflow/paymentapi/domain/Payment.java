@@ -36,6 +36,12 @@ public class Payment {
     @Column(nullable = false, length = 20)
     private PaymentState state;
 
+    // Populated only for CARD payments when Stripe verification is
+    // enabled (StripeCardTokenVerifier) -- an audit trail only, never
+    // read by the saga.
+    @Column(name = "stripe_payment_method_id")
+    private String stripePaymentMethodId;
+
     // Optimistic lock: guards against two orchestrator instances advancing
     // the same payment's state concurrently.
     @Version
@@ -53,7 +59,8 @@ public class Payment {
     }
 
     public Payment(UUID id, String idempotencyKey, UUID payerAccount, UUID payeeAccount,
-                   long amountCents, String currency, PaymentMethod paymentMethod, PaymentState state, Instant now) {
+                   long amountCents, String currency, PaymentMethod paymentMethod, PaymentState state, Instant now,
+                   String stripePaymentMethodId) {
         this.id = id;
         this.idempotencyKey = idempotencyKey;
         this.payerAccount = payerAccount;
@@ -64,6 +71,7 @@ public class Payment {
         this.state = state;
         this.createdAt = now;
         this.updatedAt = now;
+        this.stripePaymentMethodId = stripePaymentMethodId;
     }
 
     public UUID getId() {
@@ -96,6 +104,10 @@ public class Payment {
 
     public PaymentState getState() {
         return state;
+    }
+
+    public String getStripePaymentMethodId() {
+        return stripePaymentMethodId;
     }
 
     public void setState(PaymentState state, Instant now) {

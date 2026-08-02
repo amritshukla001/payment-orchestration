@@ -13,7 +13,8 @@ public record PaymentResponse(
         String paymentMethod,
         String state,
         Instant createdAt,
-        Instant updatedAt
+        Instant updatedAt,
+        String stripePaymentMethodId
 ) {
     public static PaymentResponse from(Payment payment) {
         return new PaymentResponse(
@@ -25,7 +26,8 @@ public record PaymentResponse(
                 payment.getPaymentMethod().name(),
                 payment.getState().name(),
                 payment.getCreatedAt(),
-                payment.getUpdatedAt()
+                payment.getUpdatedAt(),
+                payment.getStripePaymentMethodId()
         );
     }
 }

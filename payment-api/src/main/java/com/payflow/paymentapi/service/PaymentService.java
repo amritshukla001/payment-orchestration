@@ -2,6 +2,7 @@ package com.payflow.paymentapi.service;
 
 import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.payflow.common.enums.PaymentMethod;
 import com.payflow.common.enums.PaymentState;
 import com.payflow.common.events.PaymentEventType;
 import com.payflow.common.events.PaymentInitiatedEvent;
@@ -10,6 +11,7 @@ import com.payflow.paymentapi.domain.OutboxEvent;
 import com.payflow.paymentapi.domain.Payment;
 import com.payflow.paymentapi.repository.OutboxEventRepository;
 import com.payflow.paymentapi.repository.PaymentRepository;
+import com.payflow.paymentapi.stripe.StripeCardTokenVerifier;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -22,13 +24,16 @@ public class PaymentService {
     private final PaymentRepository paymentRepository;
     private final OutboxEventRepository outboxEventRepository;
     private final ObjectMapper objectMapper;
+    private final StripeCardTokenVerifier stripeCardTokenVerifier;
 
     public PaymentService(PaymentRepository paymentRepository,
                            OutboxEventRepository outboxEventRepository,
-                           ObjectMapper objectMapper) {
+                           ObjectMapper objectMapper,
+                           StripeCardTokenVerifier stripeCardTokenVerifier) {
         this.paymentRepository = paymentRepository;
         this.outboxEventRepository = outboxEventRepository;
         this.objectMapper = objectMapper;
+        this.stripeCardTokenVerifier = stripeCardTokenVerifier;
     }
 
     /**
@@ -43,6 +48,10 @@ public class PaymentService {
     }
 
     private Payment createNew(String idempotencyKey, CreatePaymentRequest request) {
+        if (request.paymentMethod() == PaymentMethod.CARD) {
+            stripeCardTokenVerifier.verify(request.cardToken());
+        }
+
         Instant now = Instant.now();
         UUID paymentId = UUID.randomUUID();
 
@@ -55,7 +64,8 @@ public class PaymentService {
                 request.currency(),
                 request.paymentMethod(),
                 PaymentState.INITIATED,
-                now
+                now,
+                request.paymentMethod() == PaymentMethod.CARD ? request.cardToken() : null
         );
         paymentRepository.save(payment);
 
