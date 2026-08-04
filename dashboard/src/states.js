@@ -4,6 +4,7 @@ export const STATE_META = {
   INITIATED: { label: "Initiated", tone: "inflight" },
   COMPLIANCE_CHECKED: { label: "Compliance Checked", tone: "inflight" },
   FRAUD_CHECKED: { label: "Fraud Checked", tone: "inflight" },
+  AWAITING_STEP_UP: { label: "Awaiting Step-Up", tone: "warning" },
   AUTHORIZED: { label: "Authorized", tone: "inflight" },
   LEDGER_POSTED: { label: "Ledger Posted", tone: "inflight" },
   SETTLED: { label: "Settled", tone: "success" },

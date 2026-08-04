@@ -43,6 +43,13 @@ export function fetchPayments() {
   return getJson(`${GATEWAY_URL}/api/payments`);
 }
 
+// Backs the merchant analytics view -- aggregate counts/amounts only,
+// same read-model-service projection the grid uses, just grouped instead
+// of row-by-row.
+export function fetchAnalyticsSummary(days = 7) {
+  return getJson(`${GATEWAY_URL}/api/payments/analytics/summary?days=${days}`);
+}
+
 // Kicks off a real payment through payment-api's transactional outbox --
 // the same POST /payments the curl walkthrough in the root README uses,
 // just from the dashboard instead of a terminal.

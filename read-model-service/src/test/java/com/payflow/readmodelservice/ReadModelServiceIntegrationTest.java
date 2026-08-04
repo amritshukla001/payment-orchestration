@@ -112,19 +112,79 @@ class ReadModelServiceIntegrationTest {
         assertThat(notifications).hasSize(1);
     }
 
+    // Uses >= assertions rather than exact counts -- this shares the same
+    // Testcontainers Postgres with the happy-path test above, so the
+    // read model may already contain that test's payment by the time this
+    // one runs (JUnit doesn't guarantee ordering across @Test methods).
+    @Test
+    void analyticsSummaryAggregatesAcrossPaymentsAndMethods() throws InterruptedException {
+        UUID settledPaymentId = UUID.randomUUID();
+        UUID failedPaymentId = UUID.randomUUID();
+        UUID payerAccount = UUID.randomUUID();
+        UUID payeeAccount = UUID.randomUUID();
+        UUID suspenseAccount = UUID.fromString("00000000-0000-0000-0000-000000000001");
+
+        try (KafkaProducer<String, String> producer = producer()) {
+            publish(producer, settledPaymentId, "PAYMENT_INITIATED", Map.of(
+                    "paymentId", settledPaymentId, "payerAccount", payerAccount, "payeeAccount", payeeAccount,
+                    "amountCents", 5_000L, "currency", "USD", "paymentMethod", "CARD", "occurredAt", Instant.now()));
+            publish(producer, settledPaymentId, "FRAUD_APPROVED", Map.of("paymentId", settledPaymentId, "occurredAt", Instant.now()));
+            publish(producer, settledPaymentId, "FUNDS_AUTHORIZED", Map.of("paymentId", settledPaymentId, "occurredAt", Instant.now()));
+            publish(producer, settledPaymentId, "LEDGER_POSTED", Map.of(
+                    "id", UUID.randomUUID(), "paymentId", settledPaymentId, "debitAccount", payerAccount,
+                    "creditAccount", suspenseAccount, "amountCents", 5_000L,
+                    "postingType", "HOLD", "occurredAt", Instant.now()));
+            publish(producer, settledPaymentId, "PAYMENT_SETTLED", Map.of(
+                    "paymentId", settledPaymentId, "payerAccount", payerAccount, "payeeAccount", payeeAccount,
+                    "occurredAt", Instant.now()));
+
+            publish(producer, failedPaymentId, "PAYMENT_INITIATED", Map.of(
+                    "paymentId", failedPaymentId, "payerAccount", payerAccount, "payeeAccount", payeeAccount,
+                    "amountCents", 2_000L, "currency", "USD", "paymentMethod", "UPI", "occurredAt", Instant.now()));
+            publish(producer, failedPaymentId, "PAYMENT_FAILED", Map.of(
+                    "paymentId", failedPaymentId, "payerAccount", payerAccount, "reason", "test failure",
+                    "occurredAt", Instant.now()));
+        }
+
+        awaitState(settledPaymentId, "SETTLED");
+        awaitState(failedPaymentId, "FAILED");
+
+        Map<?, ?> summary = getAnalyticsSummary();
+        assertThat(((Number) summary.get("settledCount")).longValue()).isGreaterThanOrEqualTo(1);
+        assertThat(((Number) summary.get("failedCount")).longValue()).isGreaterThanOrEqualTo(1);
+        assertThat(((Number) summary.get("settledAmountCents")).longValue()).isGreaterThanOrEqualTo(5_000L);
+
+        List<?> byMethod = (List<?>) summary.get("byMethod");
+        assertThat(byMethod).isNotEmpty();
+        List<?> dailyVolume = (List<?>) summary.get("dailyVolume");
+        assertThat(dailyVolume).isNotEmpty();
+    }
+
+    private Map<?, ?> getAnalyticsSummary() {
+        HttpHeaders headers = new HttpHeaders();
+        headers.set("X-API-Key", API_KEY);
+        ResponseEntity<Map> response = restTemplate.exchange(
+                "/api/payments/analytics/summary", HttpMethod.GET, new HttpEntity<>(headers), Map.class);
+        return response.getBody();
+    }
+
     private Map<?, ?> awaitSettled(UUID paymentId) throws InterruptedException {
+        return awaitState(paymentId, "SETTLED");
+    }
+
+    private Map<?, ?> awaitState(UUID paymentId, String expectedState) throws InterruptedException {
         long deadline = System.currentTimeMillis() + 20_000;
         while (System.currentTimeMillis() < deadline) {
             ResponseEntity<Map> response = getDetail(paymentId);
             if (response.getStatusCode().is2xxSuccessful()) {
                 Map<?, ?> payment = (Map<?, ?>) response.getBody().get("payment");
-                if (payment != null && "SETTLED".equals(payment.get("state"))) {
+                if (payment != null && expectedState.equals(payment.get("state"))) {
                     return response.getBody();
                 }
             }
             Thread.sleep(500);
         }
-        throw new AssertionError("Payment " + paymentId + " never reached SETTLED in the read model");
+        throw new AssertionError("Payment " + paymentId + " never reached " + expectedState + " in the read model");
     }
 
     private ResponseEntity<Map> getDetail(UUID paymentId) {

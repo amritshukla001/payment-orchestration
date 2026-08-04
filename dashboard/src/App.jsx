@@ -52,6 +52,19 @@ function shortId(id) {
   return id ? `${id.slice(0, 8)}…` : "";
 }
 
+// Mirrors Checkout.jsx's METHODS icons, so the same payment method reads
+// the same way whether you're looking at it as the customer or the
+// engineer.
+const METHOD_ICONS = { CARD: "💳", UPI: "📱", NETBANKING: "🏦" };
+
+function MethodCell({ method }) {
+  return (
+    <span className="method-cell">
+      <span aria-hidden="true">{METHOD_ICONS[method] ?? ""}</span> {method}
+    </span>
+  );
+}
+
 export default function App() {
   const [payments, setPayments] = useState([]);
   const [error, setError] = useState(null);
@@ -118,7 +131,8 @@ export default function App() {
       {
         headerName: "Method",
         field: "paymentMethod",
-        width: 110,
+        cellRenderer: (p) => <MethodCell method={p.value} />,
+        width: 130,
       },
       {
         headerName: "State",
@@ -177,6 +191,9 @@ export default function App() {
           </span>
           <a className="console__checkout-link" href="/?view=checkout">
             View customer checkout →
+          </a>
+          <a className="console__checkout-link" href="/?view=merchant">
+            View merchant analytics →
           </a>
         </div>
       </header>

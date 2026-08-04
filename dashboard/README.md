@@ -1,6 +1,6 @@
 # PayFlow Ops Console
 
-This app is two separate views over the same running payment-orchestration
+This app is three separate views over the same running payment-orchestration
 services, switched by URL rather than a real router (see main.jsx):
 
 - **`/`** — the ops console below: an engineering-facing grid of every
@@ -32,6 +32,22 @@ services, switched by URL rather than a real router (see main.jsx):
   KYC review or registered for UPI via the ops console's Demo controls
   panel) to see that decision from the paying customer's side instead of
   the engineer's, or generate a brand-new one.
+- **`/?view=merchant`** — a business-owner-facing analytics summary
+  (`Merchant.jsx`/`merchant.css`): total payments, settled volume, and
+  settled/reversed/failed rates, a breakdown by payment method, and a
+  7-day volume chart. Visually stays with the ops console's dark theme
+  (reuses `index.css`'s tokens) rather than introducing a third palette —
+  this is an internal/business view, not the customer-facing checkout
+  page. Backed by real `GROUP BY` aggregation queries against
+  read-model-service's `payment_view` projection
+  (`PaymentViewRepository.countByState`/`aggregateByMethod`/`dailyVolumeSince`,
+  `GET /api/payments/analytics/summary`) — no client-side math over the
+  full payment list, and no new gateway route needed since it's nested
+  under the existing `/api/payments/**` path. Polls every 10s, slower
+  than the grid's 3s, since aggregate stats don't need sub-second
+  freshness. No charting library — the daily-volume bars and method
+  breakdown are plain CSS, matching how this dashboard hasn't reached for
+  one anywhere else.
 
 The ops console — the grid and detail drawer — are read-only, polling
 `read-model-service`'s CQRS read model through the API Gateway
@@ -46,6 +62,7 @@ touches is read-only:
 |---|---|---|
 | `GET /api/payments` | read-model-service | the live grid of payments and their current state |
 | `GET /api/payments/{paymentId}` | read-model-service | the detail drawer's ledger postings and notifications, in one call |
+| `GET /api/payments/analytics/summary` | read-model-service | the merchant analytics view's KPIs, method breakdown, and daily volume |
 | `GET /api/payment-engine/{id}/summary` | payment-engine | the compensated-payment "Generate summary" button in the drawer |
 | `POST /api/payment-engine/{id}/step-up/confirm` | payment-engine | Checkout page → **Approve in bank app** (CARD payments only) |
 | `POST /api/payment-engine/{id}/step-up/decline` | payment-engine | Checkout page → **Decline** (CARD payments only) |

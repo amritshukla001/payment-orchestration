@@ -1,5 +1,6 @@
 package com.payflow.readmodelservice.api;
 
+import com.payflow.readmodelservice.api.dto.AnalyticsSummaryResponse;
 import com.payflow.readmodelservice.api.dto.LedgerEntryViewResponse;
 import com.payflow.readmodelservice.api.dto.NotificationViewResponse;
 import com.payflow.readmodelservice.api.dto.PaymentDetailResponse;
@@ -14,6 +15,8 @@ import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
 
+import java.time.Instant;
+import java.time.temporal.ChronoUnit;
 import java.util.List;
 import java.util.UUID;
 
@@ -65,6 +68,19 @@ public class PaymentViewController {
                 .toList();
 
         return new PaymentDetailResponse(PaymentViewResponse.from(view), ledgerEntries, notifications);
+    }
+
+    @Operation(summary = "Merchant analytics summary",
+            description = "Aggregate counts/amounts by state and payment method, plus daily volume over the "
+                    + "requested window (default 7 days) -- backs the dashboard's merchant analytics view. "
+                    + "No derived rates here; the caller computes those from the raw counts.")
+    @GetMapping("/analytics/summary")
+    public AnalyticsSummaryResponse analyticsSummary(@RequestParam(defaultValue = "7") int days) {
+        Instant since = Instant.now().minus(Math.max(1, days), ChronoUnit.DAYS);
+        return AnalyticsSummaryResponse.from(
+                paymentViewRepository.countByState(),
+                paymentViewRepository.aggregateByMethod(),
+                paymentViewRepository.dailyVolumeSince(since));
     }
 
     @ExceptionHandler(PaymentViewNotFoundException.class)
